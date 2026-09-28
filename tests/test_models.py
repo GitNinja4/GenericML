@@ -1,9 +1,11 @@
 import pytest
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.linear_model import Lasso, LinearRegression, LogisticRegression, Ridge
+from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, LogisticRegression, Ridge
+from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.ensemble import AdaBoostClassifier, AdaBoostRegressor, ExtraTreesClassifier, ExtraTreesRegressor, GradientBoostingClassifier, GradientBoostingRegressor, HistGradientBoostingClassifier, HistGradientBoostingRegressor
 
 from src.models.model_factory import create_model
 from src.models.registry import get_available_models, get_model_families, get_model_metadata, get_models_by_family
@@ -13,10 +15,15 @@ from src.models.registry import get_available_models, get_model_families, get_mo
     ("name", "expected"),
     [
         ("Logistic Regression", LogisticRegression),
+        ("Naive Bayes", GaussianNB),
+        ("K-Nearest Neighbors (KNN)", KNeighborsClassifier),
+        ("Support Vector Machine (SVM)", SVC),
         ("Decision Tree", DecisionTreeClassifier),
         ("Random Forest", RandomForestClassifier),
-        ("KNN", KNeighborsClassifier),
-        ("SVM", SVC),
+        ("Extra Trees", ExtraTreesClassifier),
+        ("AdaBoost", AdaBoostClassifier),
+        ("Gradient Boosting", GradientBoostingClassifier),
+        ("HistGradientBoosting", HistGradientBoostingClassifier),
     ],
 )
 def test_classification_model_factory(name: str, expected: type) -> None:
@@ -27,12 +34,17 @@ def test_classification_model_factory(name: str, expected: type) -> None:
     ("name", "expected"),
     [
         ("Linear Regression", LinearRegression),
-        ("Ridge", Ridge),
-        ("Lasso", Lasso),
-        ("Decision Tree", DecisionTreeRegressor),
-        ("Random Forest", RandomForestRegressor),
-        ("KNN", KNeighborsRegressor),
-        ("SVR", SVR),
+        ("Ridge Regression", Ridge),
+        ("Lasso Regression", Lasso),
+        ("Elastic Net", ElasticNet),
+        ("K-Nearest Neighbors Regressor", KNeighborsRegressor),
+        ("Support Vector Regressor (SVR)", SVR),
+        ("Decision Tree Regressor", DecisionTreeRegressor),
+        ("Random Forest Regressor", RandomForestRegressor),
+        ("Extra Trees Regressor", ExtraTreesRegressor),
+        ("AdaBoost Regressor", AdaBoostRegressor),
+        ("Gradient Boosting Regressor", GradientBoostingRegressor),
+        ("HistGradientBoosting Regressor", HistGradientBoostingRegressor),
     ],
 )
 def test_regression_model_factory(name: str, expected: type) -> None:
@@ -42,9 +54,13 @@ def test_regression_model_factory(name: str, expected: type) -> None:
 def test_registry_filters_by_problem_type() -> None:
     classification = get_available_models("classification")
     regression = get_available_models("regression")
-    assert "SVM" in classification and "SVM" not in regression
-    assert "SVR" in regression and "SVR" not in classification
-    assert "Decision Tree" in classification and "Decision Tree" in regression
+    assert "Support Vector Machine (SVM)" in classification
+    assert "Support Vector Regressor (SVR)" in regression
+    assert "Support Vector Machine (SVM)" not in regression
+    assert "Support Vector Regressor (SVR)" not in classification
+    assert "Decision Tree" in classification and "Decision Tree Regressor" in regression
+    assert len(classification) == 10
+    assert len(regression) == 12
 
 
 def test_registry_exposes_dynamic_family_filters() -> None:
@@ -70,4 +86,4 @@ def test_invalid_model_name_and_problem_type_raise() -> None:
     with pytest.raises(ValueError, match="Unknown model"):
         get_model_metadata("Unknown")
     with pytest.raises(ValueError, match="not available"):
-        create_model("SVR", "classification")
+        create_model("Support Vector Regressor (SVR)", "classification")

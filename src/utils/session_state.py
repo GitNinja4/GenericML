@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from config.settings import DEFAULT_RANDOM_STATE, DEFAULT_TEST_SIZE
+from config.settings import DEFAULT_RANDOM_STATE, DEFAULT_STRATIFIED_SPLIT, DEFAULT_TEST_SIZE
 
 
 def clear_training_state() -> None:
@@ -11,13 +11,13 @@ def clear_training_state() -> None:
 
     for key, default in {
         "selected_models": [],
+        "selected_models_by_type": {"classification": [], "regression": []},
         "model_configs": {},
         "training_results": {},
+        "training_class_distribution": None,
         "training_configuration_signature": None,
-        "X_train": None,
-        "X_test": None,
-        "y_train": None,
-        "y_test": None,
+        "cv_configuration": None,
+        "validation_configuration": None,
         "trained_models": {},
         "evaluation_results": {},
         "best_pipeline": None,
@@ -25,6 +25,16 @@ def clear_training_state() -> None:
         "mlflow_run_information": {},
     }.items():
         st.session_state[key] = default
+
+
+def clear_split_state() -> None:
+    """Clear raw split partitions and their dataset/target provenance."""
+    import streamlit as st
+
+    for key in ("X_train", "X_test", "y_train", "y_test"):
+        st.session_state[key] = None
+    st.session_state["split_completed"] = False
+    st.session_state["train_test_split_source"] = None
 
 
 def clear_preprocessing_state(reset_controls: bool = False) -> None:
@@ -83,7 +93,21 @@ def reset_dataset_dependent_state() -> None:
         "boolean_columns": [],
         "dataset_shape": (0, 0),
         "train_test_size": DEFAULT_TEST_SIZE,
+        "train_test_size_percent": int(DEFAULT_TEST_SIZE * 100),
         "train_random_state": DEFAULT_RANDOM_STATE,
+        "train_test_split_config": {
+            "test_size": DEFAULT_TEST_SIZE,
+            "random_state": DEFAULT_RANDOM_STATE,
+            "stratified": DEFAULT_STRATIFIED_SPLIT,
+        },
+        "train_test_stratified": DEFAULT_STRATIFIED_SPLIT,
+        "train_test_split_source": None,
+        "model_type_filter": None,
+        "X_train": None,
+        "X_test": None,
+        "y_train": None,
+        "y_test": None,
+        "split_completed": False,
     }.items():
         st.session_state[key] = default
     st.session_state.pop("problem_type_selector", None)
@@ -121,15 +145,36 @@ def initialize_session_state() -> None:
         "preprocessing_applied": False,
         "processed_feature_names": [],
         "selected_models": [],
+        "selected_models_by_type": {"classification": [], "regression": []},
         "model_configs": {},
+        "model_type_filter": None,
+        "training_cv_folds": 5,
+        "training_validation_strategy": "None",
+        "training_sampling_method": "Disabled",
+        "training_random_state": DEFAULT_RANDOM_STATE,
+        "training_shuffle_folds": True,
+        "training_scoring_metric": None,
+        "training_use_default_scoring": True,
         "train_test_size": DEFAULT_TEST_SIZE,
+        "train_test_size_percent": int(DEFAULT_TEST_SIZE * 100),
         "train_random_state": DEFAULT_RANDOM_STATE,
+        "train_test_split_config": {
+            "test_size": DEFAULT_TEST_SIZE,
+            "random_state": DEFAULT_RANDOM_STATE,
+            "stratified": DEFAULT_STRATIFIED_SPLIT,
+        },
+        "train_test_stratified": DEFAULT_STRATIFIED_SPLIT,
+        "train_test_split_source": None,
         "training_results": {},
+        "training_class_distribution": None,
         "training_configuration_signature": None,
+        "cv_configuration": None,
+        "validation_configuration": None,
         "X_train": None,
         "X_test": None,
         "y_train": None,
         "y_test": None,
+        "split_completed": False,
         "trained_models": {},
         "evaluation_results": {},
         "best_pipeline": None,

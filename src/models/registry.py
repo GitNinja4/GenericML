@@ -1,114 +1,181 @@
-"""Single source of truth for the dataset-aware model library."""
+"""Single source of truth for registered model constructors and UI metadata."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from sklearn.ensemble import (
+	AdaBoostClassifier,
+	AdaBoostRegressor,
+	ExtraTreesClassifier,
+	ExtraTreesRegressor,
+	GradientBoostingClassifier,
+	GradientBoostingRegressor,
+	HistGradientBoostingClassifier,
+	HistGradientBoostingRegressor,
+	RandomForestClassifier,
+	RandomForestRegressor,
+)
+from sklearn.linear_model import (
+	ElasticNet,
+	Lasso,
+	LinearRegression,
+	LogisticRegression,
+	Ridge,
+)
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+
+
+@dataclass(frozen=True)
+class ModelParameter:
+	"""A registry-owned definition for one generic parameter control."""
+
+	name: str
+	label: str
+	control: str
+	minimum: int | float | None = None
+	maximum: int | float | None = None
+	step: int | float | None = None
+	options: tuple[Any, ...] = ()
+	format: str | None = None
+
 
 @dataclass(frozen=True)
 class ModelMetadata:
-    """Educational metadata used by model cards, filters, and factories."""
+	"""Constructor, defaults, family, and parameter controls for one model."""
 
-    name: str
-    problem_type: str
-    family: str
-    description: str
-    default_parameters: dict[str, Any]
-    factory: Callable[[str, dict[str, Any] | None], Any]
-
-
-def _classification_factory(name: str, parameters: dict[str, Any] | None = None) -> Any:
-    from src.models.classification import create_classification_model
-
-    return create_classification_model(name, parameters)
+	name: str
+	problem_type: str
+	family: str
+	description: str
+	default_parameters: dict[str, Any]
+	constructors: dict[str, Callable[..., Any]]
+	parameter_schema: tuple[ModelParameter, ...] = ()
 
 
-def _regression_factory(name: str, parameters: dict[str, Any] | None = None) -> Any:
-    from src.models.regression import create_regression_model
+def _parameter(
+	name: str,
+	label: str,
+	control: str,
+	minimum: int | float | None = None,
+	maximum: int | float | None = None,
+	step: int | float | None = None,
+	options: tuple[Any, ...] = (),
+	format: str | None = None,
+) -> ModelParameter:
+	return ModelParameter(name, label, control, minimum, maximum, step, options, format)
 
-    return create_regression_model(name, parameters)
+
+def _classification(
+	name: str,
+	family: str,
+	description: str,
+	constructor: Callable[..., Any],
+	defaults: dict[str, Any] | None = None,
+	parameters: tuple[ModelParameter, ...] = (),
+) -> ModelMetadata:
+	return ModelMetadata(name, "classification", family, description, defaults or {}, {"classification": constructor}, parameters)
 
 
-def _classification(name: str, family: str, description: str, parameters: dict[str, Any] | None = None) -> ModelMetadata:
-    return ModelMetadata(name, "classification", family, description, parameters or {}, _classification_factory)
+def _regression(
+	name: str,
+	family: str,
+	description: str,
+	constructor: Callable[..., Any],
+	defaults: dict[str, Any] | None = None,
+	parameters: tuple[ModelParameter, ...] = (),
+) -> ModelMetadata:
+	return ModelMetadata(name, "regression", family, description, defaults or {}, {"regression": constructor}, parameters)
 
 
-def _regression(name: str, family: str, description: str, parameters: dict[str, Any] | None = None) -> ModelMetadata:
-    return ModelMetadata(name, "regression", family, description, parameters or {}, _regression_factory)
+def _both(
+	name: str,
+	family: str,
+	description: str,
+	classification_constructor: Callable[..., Any],
+	regression_constructor: Callable[..., Any],
+	defaults: dict[str, Any],
+	parameters: tuple[ModelParameter, ...] = (),
+) -> ModelMetadata:
+	return ModelMetadata(
+		name,
+		"both",
+		family,
+		description,
+		defaults,
+		{"classification": classification_constructor, "regression": regression_constructor},
+		parameters,
+	)
+
+
+_DEPTH = _parameter("max_depth", "Max depth", "optional_int", options=(None, 3, 5, 10, 20))
+_MIN_SPLIT = _parameter("min_samples_split", "Minimum samples split", "int", 2, step=1)
+_MIN_LEAF = _parameter("min_samples_leaf", "Minimum samples leaf", "int", 1, step=1)
+_N_ESTIMATORS = _parameter("n_estimators", "Number of estimators", "int", 10, 1000, 10)
+_C = _parameter("C", "C", "float", 0.0001, step=0.1)
+_KERNEL = _parameter("kernel", "Kernel", "select", options=("rbf", "linear", "poly"))
+_GAMMA = _parameter("gamma", "Gamma", "select", options=("scale", "auto"))
+_ALPHA = _parameter("alpha", "Alpha", "float", 0.0, step=0.1)
+_MAX_ITER = _parameter("max_iter", "Max iterations", "int", 100, step=100)
+_LEARNING_RATE = _parameter("learning_rate", "Learning rate", "float", 0.001, 1.0, 0.05)
+_MAX_LEAF_NODES = _parameter("max_leaf_nodes", "Maximum leaf nodes", "optional_int", options=(None, 15, 31, 63, 127))
+_EPSILON = _parameter("epsilon", "Epsilon", "float", 0.0, step=0.05)
 
 
 MODEL_REGISTRY: dict[str, ModelMetadata] = {
-    "Logistic Regression": _classification("Logistic Regression", "Linear", "A linear classifier that estimates class probabilities.", {"C": 1.0, "max_iter": 1000}),
-    "Ridge Classifier": _classification("Ridge Classifier", "Linear", "A linear classifier with L2 regularization."),
-    "SGD Classifier": _classification("SGD Classifier", "Linear", "A linear model optimized with stochastic gradient descent."),
-    "Perceptron": _classification("Perceptron", "Linear", "A simple linear classifier based on thresholded updates."),
-    "Decision Tree": ModelMetadata("Decision Tree", "both", "Tree-Based", "A tree model that recursively splits data into decision rules.", {"max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, _classification_factory),
-    "Extra Trees Classifier": _classification("Extra Trees Classifier", "Tree-Based", "An ensemble of highly randomized decision trees."),
-    "Random Forest": ModelMetadata("Random Forest", "both", "Ensemble", "An ensemble of decision trees that combines many randomized trees.", {"n_estimators": 100, "max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, _classification_factory),
-    "Bagging Classifier": _classification("Bagging Classifier", "Ensemble", "An ensemble that trains models on randomized samples."),
-    "Voting Classifier": _classification("Voting Classifier", "Ensemble", "Combines predictions from complementary base classifiers."),
-    "Stacking Classifier": _classification("Stacking Classifier", "Ensemble", "Learns a final classifier from several base model predictions."),
-    "Gradient Boosting Classifier": _classification("Gradient Boosting Classifier", "Boosting", "Builds an additive classifier from sequential decision trees."),
-    "HistGradientBoosting Classifier": _classification("HistGradientBoosting Classifier", "Boosting", "A histogram-based gradient boosting classifier."),
-    "AdaBoost Classifier": _classification("AdaBoost Classifier", "Boosting", "Builds a strong classifier by focusing on difficult examples."),
-    "KNN": ModelMetadata("KNN", "both", "Distance-Based", "A model that predicts from nearby training examples.", {"n_neighbors": 5, "weights": "uniform", "metric": "minkowski"}, _classification_factory),
-    "SVM": _classification("SVM", "Kernel-Based", "A maximum-margin classifier with configurable kernels.", {"C": 1.0, "kernel": "rbf", "gamma": "scale", "probability": True}),
-    "NuSVC": _classification("NuSVC", "Kernel-Based", "A support-vector classifier using a nu parameter."),
-    "Gaussian Naive Bayes": _classification("Gaussian Naive Bayes", "Probabilistic", "A probabilistic classifier for continuous features."),
-    "Multinomial Naive Bayes": _classification("Multinomial Naive Bayes", "Probabilistic", "A probabilistic classifier for count-like non-negative features."),
-    "Bernoulli Naive Bayes": _classification("Bernoulli Naive Bayes", "Probabilistic", "A probabilistic classifier for binary-valued features."),
-    "Complement Naive Bayes": _classification("Complement Naive Bayes", "Probabilistic", "A Naive Bayes variant designed for imbalanced text-like data."),
-    "Linear Discriminant Analysis": _classification("Linear Discriminant Analysis", "Discriminant Analysis", "A generative linear discriminant model."),
-    "Quadratic Discriminant Analysis": _classification("Quadratic Discriminant Analysis", "Discriminant Analysis", "A generative discriminant model with class-specific covariance."),
-    "Linear Regression": _regression("Linear Regression", "Linear", "A linear model that estimates a continuous target."),
-    "Ridge": _regression("Ridge", "Linear", "Linear regression with L2 regularization.", {"alpha": 1.0}),
-    "Lasso": _regression("Lasso", "Linear", "Linear regression with L1 regularization.", {"alpha": 0.001, "max_iter": 5000}),
-    "ElasticNet": _regression("ElasticNet", "Linear", "Linear regression with combined L1 and L2 regularization."),
-    "SGD Regressor": _regression("SGD Regressor", "Linear", "A linear regressor optimized with stochastic gradient descent."),
-    "Huber Regressor": _regression("Huber Regressor", "Robust Regression", "A robust linear model that reduces the effect of outliers."),
-    "RANSAC Regressor": _regression("RANSAC Regressor", "Robust Regression", "A robust estimator that fits consensus subsets."),
-    "Theil-Sen Regressor": _regression("Theil-Sen Regressor", "Robust Regression", "A robust regression estimator based on spatial medians."),
-    "Decision Tree Regressor": _regression("Decision Tree Regressor", "Tree-Based", "A tree model for continuous target decisions."),
-    "Extra Trees Regressor": _regression("Extra Trees Regressor", "Tree-Based", "An ensemble of highly randomized regression trees."),
-    "Random Forest Regressor": _regression("Random Forest Regressor", "Ensemble", "An ensemble of randomized trees for continuous targets."),
-    "Bagging Regressor": _regression("Bagging Regressor", "Ensemble", "An ensemble regressor trained on randomized samples."),
-    "Voting Regressor": _regression("Voting Regressor", "Ensemble", "Averages predictions from several base regressors."),
-    "Stacking Regressor": _regression("Stacking Regressor", "Ensemble", "Learns a final regressor from several base predictions."),
-    "Gradient Boosting Regressor": _regression("Gradient Boosting Regressor", "Boosting", "Builds an additive regressor from sequential trees."),
-    "HistGradientBoosting Regressor": _regression("HistGradientBoosting Regressor", "Boosting", "A histogram-based gradient boosting regressor."),
-    "AdaBoost Regressor": _regression("AdaBoost Regressor", "Boosting", "Builds a strong regressor by focusing on difficult examples."),
-    "KNN Regressor": _regression("KNN Regressor", "Distance-Based", "Predicts a continuous target from nearby examples."),
-    "SVR": _regression("SVR", "Kernel-Based", "A support-vector model for continuous targets.", {"C": 1.0, "kernel": "rbf", "gamma": "scale", "epsilon": 0.1}),
-    "NuSVR": _regression("NuSVR", "Kernel-Based", "A support-vector regressor using a nu parameter."),
-    "LinearSVR": _regression("LinearSVR", "Kernel-Based", "A fast linear support-vector regressor."),
+	"Logistic Regression": _classification("Logistic Regression", "Linear", "A linear classifier that estimates class probabilities.", LogisticRegression, {"C": 1.0, "max_iter": 1000}, (_C, _MAX_ITER)),
+	"Naive Bayes": _classification("Naive Bayes", "Probabilistic", "A probabilistic classifier based on Bayes' theorem.", GaussianNB, {"var_smoothing": 1e-9}, (_parameter("var_smoothing", "Variance smoothing", "float", 1e-12, 1e-6, 1e-10, format="%.2e"),)),
+	"K-Nearest Neighbors (KNN)": _classification("K-Nearest Neighbors (KNN)", "Distance-Based", "Classifies a sample from its nearest training examples.", KNeighborsClassifier, {"n_neighbors": 5, "weights": "uniform", "metric": "minkowski"}, (_parameter("n_neighbors", "Number of neighbors", "int", 1, step=1), _parameter("weights", "Weights", "select", options=("uniform", "distance")), _parameter("metric", "Metric", "select", options=("minkowski", "manhattan", "euclidean")))),
+	"Support Vector Machine (SVM)": _classification("Support Vector Machine (SVM)", "Kernel-Based", "A maximum-margin classifier with configurable kernels.", SVC, {"C": 1.0, "kernel": "rbf", "gamma": "scale", "probability": True}, (_C, _KERNEL, _GAMMA, _parameter("probability", "Probability estimates", "bool"))),
+	"Decision Tree": _classification("Decision Tree", "Tree-Based", "A tree classifier that learns decision rules from features.", DecisionTreeClassifier, {"max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, (_DEPTH, _MIN_SPLIT, _MIN_LEAF)),
+	"Random Forest": _classification("Random Forest", "Ensemble", "An ensemble of randomized decision trees.", RandomForestClassifier, {"n_estimators": 100, "max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, (_N_ESTIMATORS, _DEPTH, _MIN_SPLIT, _MIN_LEAF)),
+	"Extra Trees": _classification("Extra Trees", "Ensemble", "An ensemble of highly randomized decision trees.", ExtraTreesClassifier, {"n_estimators": 100, "max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, (_N_ESTIMATORS, _DEPTH, _MIN_SPLIT, _MIN_LEAF)),
+	"AdaBoost": _classification("AdaBoost", "Boosting", "Boosts weak learners by focusing on difficult examples.", AdaBoostClassifier, {"n_estimators": 50, "learning_rate": 1.0}, (_N_ESTIMATORS, _LEARNING_RATE)),
+	"Gradient Boosting": _classification("Gradient Boosting", "Boosting", "Builds an additive classifier from sequential decision trees.", GradientBoostingClassifier, {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3}, (_N_ESTIMATORS, _LEARNING_RATE, _DEPTH)),
+	"HistGradientBoosting": _classification("HistGradientBoosting", "Boosting", "A histogram-based gradient boosting classifier.", HistGradientBoostingClassifier, {"max_iter": 100, "learning_rate": 0.1, "max_leaf_nodes": 31}, (_MAX_ITER, _LEARNING_RATE, _MAX_LEAF_NODES)),
+	"Linear Regression": _regression("Linear Regression", "Linear", "A linear model that estimates a continuous target.", LinearRegression, {"fit_intercept": True}, (_parameter("fit_intercept", "Fit intercept", "bool"),)),
+	"Ridge Regression": _regression("Ridge Regression", "Linear", "Linear regression with L2 regularization.", Ridge, {"alpha": 1.0}, (_ALPHA,)),
+	"Lasso Regression": _regression("Lasso Regression", "Linear", "Linear regression with L1 regularization.", Lasso, {"alpha": 0.001, "max_iter": 5000}, (_parameter("alpha", "Alpha", "float", 0.0001, step=0.001, format="%.4f"), _MAX_ITER)),
+	"Elastic Net": _regression("Elastic Net", "Linear", "Linear regression with combined L1 and L2 regularization.", ElasticNet, {"alpha": 1.0, "l1_ratio": 0.5}, (_ALPHA, _parameter("l1_ratio", "L1 ratio", "float", 0.0, 1.0, 0.05))),
+	"K-Nearest Neighbors Regressor": _regression("K-Nearest Neighbors Regressor", "Distance-Based", "Predicts a continuous target from nearby examples.", KNeighborsRegressor, {"n_neighbors": 5, "weights": "uniform", "metric": "minkowski"}, (_parameter("n_neighbors", "Number of neighbors", "int", 1, step=1), _parameter("weights", "Weights", "select", options=("uniform", "distance")), _parameter("metric", "Metric", "select", options=("minkowski", "manhattan", "euclidean")))),
+	"Support Vector Regressor (SVR)": _regression("Support Vector Regressor (SVR)", "Kernel-Based", "A support-vector model for continuous targets.", SVR, {"C": 1.0, "kernel": "rbf", "gamma": "scale", "epsilon": 0.1}, (_C, _KERNEL, _GAMMA, _EPSILON)),
+	"Decision Tree Regressor": _regression("Decision Tree Regressor", "Tree-Based", "A tree model for continuous target decisions.", DecisionTreeRegressor, {"max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, (_DEPTH, _MIN_SPLIT, _MIN_LEAF)),
+	"Random Forest Regressor": _regression("Random Forest Regressor", "Ensemble", "An ensemble of randomized trees for continuous targets.", RandomForestRegressor, {"n_estimators": 100, "max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, (_N_ESTIMATORS, _DEPTH, _MIN_SPLIT, _MIN_LEAF)),
+	"Extra Trees Regressor": _regression("Extra Trees Regressor", "Ensemble", "An ensemble of highly randomized regression trees.", ExtraTreesRegressor, {"n_estimators": 100, "max_depth": None, "min_samples_split": 2, "min_samples_leaf": 1}, (_N_ESTIMATORS, _DEPTH, _MIN_SPLIT, _MIN_LEAF)),
+	"AdaBoost Regressor": _regression("AdaBoost Regressor", "Boosting", "Builds a strong regressor by focusing on difficult examples.", AdaBoostRegressor, {"n_estimators": 50, "learning_rate": 1.0}, (_N_ESTIMATORS, _LEARNING_RATE)),
+	"Gradient Boosting Regressor": _regression("Gradient Boosting Regressor", "Boosting", "Builds an additive regressor from sequential trees.", GradientBoostingRegressor, {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3}, (_N_ESTIMATORS, _LEARNING_RATE, _DEPTH)),
+	"HistGradientBoosting Regressor": _regression("HistGradientBoosting Regressor", "Boosting", "A histogram-based gradient boosting regressor.", HistGradientBoostingRegressor, {"max_iter": 100, "learning_rate": 0.1, "max_leaf_nodes": 31}, (_MAX_ITER, _LEARNING_RATE, _MAX_LEAF_NODES)),
 }
 
 
 def get_available_models(problem_type: str) -> list[str]:
-    """Return model names valid for classification or regression."""
-    if problem_type not in {"classification", "regression"}:
-        raise ValueError(f"Unsupported problem type: {problem_type}")
-    return [metadata.name for metadata in MODEL_REGISTRY.values() if metadata.problem_type in {problem_type, "both"}]
+	"""Return model names valid for classification or regression."""
+	if problem_type not in {"classification", "regression"}:
+		raise ValueError(f"Unsupported problem type: {problem_type}")
+	return [metadata.name for metadata in MODEL_REGISTRY.values() if metadata.problem_type in {problem_type, "both"}]
 
 
 def get_model_families(problem_type: str) -> list[str]:
-    """Return registry-derived family filters for the selected problem type."""
-    models = [MODEL_REGISTRY[name] for name in get_available_models(problem_type)]
-    return ["All Families", *dict.fromkeys(metadata.family for metadata in models)]
+	"""Return registry-derived family filters for the selected problem type."""
+	models = [MODEL_REGISTRY[name] for name in get_available_models(problem_type)]
+	return ["All Families", *dict.fromkeys(metadata.family for metadata in models)]
 
 
 def get_models_by_family(problem_type: str, family: str = "All Families") -> list[str]:
-    """Return compatible model names filtered by a registry family."""
-    names = get_available_models(problem_type)
-    if family == "All Families":
-        return names
-    return [name for name in names if MODEL_REGISTRY[name].family == family]
+	"""Return compatible model names filtered by a registry family."""
+	names = get_available_models(problem_type)
+	if family == "All Families":
+		return names
+	return [name for name in names if MODEL_REGISTRY[name].family == family]
 
 
 def get_model_metadata(model_name: str) -> ModelMetadata:
-    """Return metadata for a registered model."""
-    try:
-        return MODEL_REGISTRY[model_name]
-    except KeyError as exc:
-        raise ValueError(f"Unknown model: {model_name}") from exc
+	"""Return metadata for a registered model."""
+	try:
+		return MODEL_REGISTRY[model_name]
+	except KeyError as exc:
+		raise ValueError(f"Unknown model: {model_name}") from exc

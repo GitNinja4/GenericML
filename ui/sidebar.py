@@ -28,8 +28,10 @@ def render_sidebar() -> None:
         completed_steps = {
             "Dataset": dataset_ready,
             "EDA": eda_ready,
+            "Train / Test Split": bool(st.session_state.get("split_completed")),
             "Preprocessing": preprocessing_ready,
-            "Models": models_trained,
+            "Models": bool(st.session_state.get("selected_models")),
+            "Training": models_trained,
             "Tuning": False,
             "Evaluation": False,
             "MLflow": False,

@@ -18,12 +18,5 @@ def create_model(
 		raise ValueError(f"Model '{model_name}' is not available for {problem_type}.")
 	resolved_parameters = dict(metadata.default_parameters)
 	resolved_parameters.update(parameters or {})
-	if metadata.problem_type == "both":
-		if problem_type == "classification":
-			from src.models.classification import create_classification_model
-
-			return create_classification_model(model_name, resolved_parameters)
-		from src.models.regression import create_regression_model
-
-		return create_regression_model(model_name, resolved_parameters)
-	return metadata.factory(model_name, resolved_parameters)
+	constructor = metadata.constructors[problem_type]
+	return constructor(**resolved_parameters)

@@ -9,6 +9,8 @@ from ui.tabs.eda import render_eda_tab
 from ui.tabs.models import render_models_tab
 from ui.tabs.placeholders import render_placeholder_page
 from ui.tabs.preprocessing import render_preprocessing_tab
+from ui.tabs.train_test_split import render_train_test_split_tab
+from ui.tabs.training import render_training_tab
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -26,10 +28,14 @@ if current_page == "dataset":
     render_dataset_tab()
 elif current_page == "eda":
     render_eda_tab()
+elif current_page == "train_test_split":
+    render_train_test_split_tab()
 elif current_page == "preprocessing":
     render_preprocessing_tab()
 elif current_page == "models":
     render_models_tab()
+elif current_page == "training":
+    render_training_tab()
 elif current_page in {"tuning", "evaluation", "mlflow", "prediction"}:
     render_placeholder_page(current_page)
 else:

@@ -13,7 +13,7 @@ from src.preprocessing.pipeline_builder import (
 )
 from src.utils.logging import get_logger
 from src.utils.session_state import clear_preprocessing_state
-from ui.components import navigate, render_cta, render_empty_state, render_page_header
+from ui.components import navigate, render_cta, render_empty_state, render_page_header, render_workflow_progress
 
 logger = get_logger(__name__)
 
@@ -33,41 +33,6 @@ def _render_dataset_information(dataset: pd.DataFrame, target_column: str | None
 		st.write(st.session_state.get("dataset_name") or "Uploaded dataset")
 		st.caption(f"{summary['rows']:,} rows · {summary['columns']:,} columns")
 		st.caption(f"Target: {target_column or 'Not selected'} ({problem_type or 'Not selected'})")
-
-
-def _render_workflow_progress() -> None:
-	steps = (
-		("Dataset", "complete", "✓"),
-		("EDA", "complete", "✓"),
-		("Preprocessing", "active", "3"),
-		("Models", "upcoming", "4"),
-		("Tuning", "upcoming", "5"),
-		("Evaluation", "upcoming", "6"),
-		("MLflow", "upcoming", "7"),
-		("Prediction", "upcoming", "8"),
-	)
-	step_markup = "".join(
-		f'<div class="prep-progress-step {state}"><span class="prep-progress-marker">{marker}</span>'
-		f'<span class="prep-progress-label">{label}</span></div>'
-		for label, state, marker in steps
-	)
-	st.markdown(
-		"""
-		<style>
-		.prep-workflow { position: relative; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0.2rem; margin: 0 0 1rem; padding: 0.55rem 0.35rem; overflow-x: auto; border: 1px solid var(--ml-border); border-radius: 10px; background: var(--ml-panel); }
-		.prep-workflow::before { content: ""; position: absolute; top: 1.25rem; left: 6%; right: 6%; height: 1px; background: var(--ml-border); }
-		.prep-progress-step { position: relative; z-index: 1; display: flex; min-width: 3.7rem; flex-direction: column; align-items: center; gap: 0.25rem; color: var(--ml-muted); font-size: 0.65rem; }
-		.prep-progress-marker { display: grid; place-items: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--ml-border); border-radius: 50%; background: var(--ml-panel-soft); box-shadow: 0 0 0 3px var(--ml-panel); font-size: 0.68rem; font-weight: 700; }
-		.prep-progress-step.complete .prep-progress-marker { border-color: transparent; background: #16a34a; color: #fff; }
-		.prep-progress-step.complete .prep-progress-label { color: var(--ml-text); }
-		.prep-progress-step.active { color: var(--ml-primary); font-weight: 700; }
-		.prep-progress-step.active .prep-progress-marker { border-color: var(--ml-primary); background: var(--ml-primary); color: #fff; box-shadow: 0 0 0 3px var(--ml-panel), 0 0 0 5px light-dark(#dbeafe, #1e3a5f); }
-		.prep-progress-label { white-space: nowrap; }
-		</style>
-		<div class="prep-workflow">
-		""" + step_markup + "</div>",
-		unsafe_allow_html=True,
-	)
 
 
 def _render_summary(dataset: pd.DataFrame, target_column: str | None, problem_type: str | None) -> None:
@@ -320,15 +285,15 @@ def render_preprocessing_tab() -> None:
 	"""Render user-controlled preprocessing settings without modifying raw data."""
 	dataset = st.session_state.get("dataset")
 	if dataset is None:
-		render_page_header("Data preprocessing", "Configure and apply transformations to prepare your data for modeling.", "03 · Prepare")
+		render_page_header("Data preprocessing", "Configure and apply transformations to prepare your data for modeling.", "04 · Prepare")
 		render_empty_state("No dataset available", "Upload a dataset and select a target before configuring preprocessing.", "tune")
 		return
 	target_column = st.session_state.get("target_column")
 	problem_type = st.session_state.get("problem_type") or st.session_state.get("detected_problem_type")
-	_render_workflow_progress()
+	render_workflow_progress("preprocessing")
 	heading_column, information_column = st.columns([2.4, 1], vertical_alignment="center")
 	with heading_column:
-		render_page_header("Data preprocessing", "Configure transformations to prepare your data for machine learning.", "03 · Prepare")
+		render_page_header("Data preprocessing", "Configure transformations to prepare your data for machine learning.", "04 · Prepare")
 	with information_column:
 		_render_dataset_information(dataset, target_column, problem_type)
 	_render_summary(dataset, target_column, problem_type)
@@ -435,7 +400,7 @@ def render_preprocessing_tab() -> None:
 		_render_preview(dataset, config, False)
 	back_column, spacer_column, models_column = st.columns([1, 1, 2], vertical_alignment="center")
 	with back_column:
-		if st.button("← Back to EDA", key="preprocessing_to_eda", width="stretch"):
-			navigate("eda")
+		if st.button("← Back to Train / Test Split", key="preprocessing_to_split", width="stretch"):
+			navigate("train_test_split")
 	with models_column:
 		render_cta("Configure models →", "models", "preprocessing_to_models", disabled=not st.session_state.get("preprocessing_applied"))

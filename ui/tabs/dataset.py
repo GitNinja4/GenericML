@@ -17,7 +17,7 @@ from src.data.analyzer import (
 from src.data.loader import load_csv
 from src.data.validator import validate_dataset, validate_target
 from src.utils.logging import get_logger
-from src.utils.session_state import clear_preprocessing_state, reset_dataset_dependent_state
+from src.utils.session_state import clear_preprocessing_state, clear_split_state, reset_dataset_dependent_state
 from ui.components import render_cta, render_page_header, render_stat_cards, render_status_badge
 
 logger = get_logger(__name__)
@@ -150,6 +150,7 @@ def render_dataset_tab() -> None:
     target_changed = previous_target_column is not None and previous_target_column != target_column
     if target_changed:
         clear_preprocessing_state(reset_controls=True)
+        clear_split_state()
     st.session_state["target_column"] = target_column
 
     target_series = dataset[target_column]
@@ -158,6 +159,7 @@ def render_dataset_tab() -> None:
     except ValueError as exc:
         if not target_changed:
             clear_preprocessing_state(reset_controls=True)
+            clear_split_state()
         st.session_state["problem_type"] = None
         st.session_state["detected_problem_type"] = None
         st.error(str(exc))
@@ -171,12 +173,15 @@ def render_dataset_tab() -> None:
         effective_problem_type = selected_problem_type.lower()
 
     if effective_problem_type == "classification" and st.session_state["target_n_classes"] < 2:
+        clear_preprocessing_state(reset_controls=True)
+        clear_split_state()
         st.error("The selected target contains only one class. A classification model requires at least two classes.")
         return
 
     problem_type_changed = previous_problem_type is not None and previous_problem_type != effective_problem_type
     if problem_type_changed and not target_changed:
         clear_preprocessing_state(reset_controls=True)
+        clear_split_state()
 
     if target_changed or problem_type_changed:
         st.info("Target or problem type changed. Preprocessing and training state were cleared.")

@@ -33,34 +33,7 @@ from src.visualization.eda_plots import (
 	create_scatter_plot,
 	create_target_distribution,
 )
-from ui.components import render_cta, render_empty_state, render_page_header
-
-
-def _render_workflow_progress() -> None:
-	steps = ("Dataset", "EDA", "Preprocessing", "Models", "Tuning", "Evaluation", "MLflow", "Prediction")
-	items = []
-	for number, label in enumerate(steps, start=1):
-		state = "complete" if number == 1 else "active" if number == 2 else "upcoming"
-		marker = "✓" if state == "complete" else str(number)
-		items.append(
-			f'<div class="eda-step {state}"><span class="eda-step-marker">{marker}</span>'
-			f'<span class="eda-step-label">{label}</span></div>'
-		)
-	st.markdown(
-		"""
-		<style>
-		.eda-workflow { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0 0 1rem; padding: 0.45rem; border: 1px solid var(--ml-border); border-radius: 10px; background: var(--ml-panel); }
-		.eda-step { flex: 1 1 6rem; min-width: 5.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 0.25rem; color: var(--ml-muted); font-size: 0.7rem; }
-		.eda-step-marker { display: grid; place-items: center; width: 1.45rem; height: 1.45rem; border-radius: 50%; background: var(--ml-panel-soft); color: var(--ml-muted); font-weight: 700; }
-		.eda-step.complete .eda-step-marker { background: light-dark(#dcfce7, #123522); color: light-dark(#166534, #86efac); }
-		.eda-step.active { color: var(--ml-text); font-weight: 700; }
-		.eda-step.active .eda-step-marker { background: var(--ml-primary); color: #ffffff; }
-		.eda-step-label { white-space: nowrap; }
-		</style>
-		<div class="eda-workflow">
-		""" + "".join(items) + "</div>",
-		unsafe_allow_html=True,
-	)
+from ui.components import render_cta, render_empty_state, render_page_header, render_workflow_progress
 
 
 def _render_eda_header(df: pd.DataFrame, target_column: str | None, problem_type: str | None) -> None:
@@ -450,7 +423,7 @@ def _render_insights(df: pd.DataFrame, target_column: str | None, problem_type: 
 
 def render_eda_tab() -> None:
 	"""Render observational EDA for the currently loaded dataset."""
-	_render_workflow_progress()
+	render_workflow_progress("eda")
 	dataset = st.session_state.get("dataset")
 	if dataset is None:
 		render_page_header(
@@ -480,4 +453,4 @@ def render_eda_tab() -> None:
 		_render_outliers(dataset)
 	with tabs[5]:
 		_render_target_analysis(dataset, target_column, problem_type)
-	render_cta("Let's do preprocessing →", "preprocessing", "eda_to_preprocessing")
+	render_cta("Continue to Train / Test Split →", "train_test_split", "eda_to_train_test_split")

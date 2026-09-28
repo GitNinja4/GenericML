@@ -1,10 +1,13 @@
+import numpy as np
 import pandas as pd
 import pytest
+from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import load_breast_cancer, load_diabetes, make_classification, make_regression
 from streamlit.testing.v1 import AppTest
 from pathlib import Path
 
-from src.models.registry import get_available_models, get_model_families
+from src.models.registry import MODEL_REGISTRY, ModelMetadata, ModelParameter, get_available_models, get_model_families
+from src.models.model_factory import create_model
 from src.preprocessing.pipeline_builder import PreprocessingConfig, build_preprocessing_pipeline
 from src.training.workflow import split_dataset
 
@@ -22,18 +25,28 @@ def _seed_app(dataset: pd.DataFrame, target: str, problem_type: str) -> AppTest:
     app.session_state["current_page"] = "preprocessing"
     app.session_state["target_n_classes"] = int(dataset[target].nunique())
     app.session_state["prep_selected_features"] = feature_columns
-    app.session_state["selected_models"] = ["Logistic Regression"] if problem_type == "classification" else ["Ridge"]
+    app.session_state["selected_models"] = ["Logistic Regression"] if problem_type == "classification" else ["Ridge Regression"]
     return app
 
 
 def _apply_and_train(app: AppTest) -> None:
+    app.session_state["current_page"] = "train_test_split"
     app.run()
+    assert not app.exception, app.exception
+    split_index = [button.label for button in app.button].index("Perform Train / Test Split")
+    app.button[split_index].click().run()
+    assert not app.exception, app.exception
+    continue_index = [button.label for button in app.button].index("Continue to Preprocessing →")
+    app.button[continue_index].click().run()
     assert not app.exception, app.exception
     apply_index = [button.label for button in app.button].index("Apply preprocessing configuration")
     app.button[apply_index].click().run()
     assert not app.exception, app.exception
     models_index = [button.label for button in app.button].index("Configure models →")
     app.button[models_index].click().run()
+    assert not app.exception, app.exception
+    training_index = [button.label for button in app.button].index("Continue to Training →")
+    app.button[training_index].click().run()
     assert not app.exception, app.exception
     train_index = [button.label for button in app.button].index("Train selected models")
     app.button[train_index].click().run()
@@ -46,6 +59,8 @@ def test_fresh_session_has_useful_empty_states() -> None:
     assert "Please upload a CSV dataset to continue." in [item.value for item in app.info]
     assert any("Dataset" in button.label for button in app.button)
     assert not app.success
+    assert app.session_state["train_test_split_config"] == {"test_size": 0.2, "random_state": 42, "stratified": True}
+    assert app.session_state["split_completed"] is False
 
 
 def test_app_uses_genericml_studio_branding() -> None:
@@ -54,6 +69,43 @@ def test_app_uses_genericml_studio_branding() -> None:
     rendered = "\n".join(item.value for item in app.markdown)
     assert "GenericML Studio" in rendered
     assert "MLFlow Studio" not in rendered
+
+
+def test_split_action_stores_raw_partitions_without_training() -> None:
+    values, labels = make_classification(n_samples=40, n_features=3, n_informative=2, n_redundant=0, random_state=9)
+    dataset = pd.DataFrame(values, columns=["a", "b", "c"])
+    dataset["target"] = labels
+    app = _seed_app(dataset, "target", "classification")
+    app.session_state["current_page"] = "train_test_split"
+
+    app.run()
+    split_button = next(button for button in app.button if button.label == "Perform Train / Test Split")
+    split_button.click().run()
+
+    assert not app.exception, app.exception
+    expected = split_dataset(dataset[["a", "b", "c"]], dataset["target"], "classification", 0.2, 42)
+    actual = (
+        app.session_state["X_train"],
+        app.session_state["X_test"],
+        app.session_state["y_train"],
+        app.session_state["y_test"],
+    )
+    for actual_part, expected_part in zip(actual, expected, strict=True):
+        if isinstance(expected_part, pd.DataFrame):
+            pd.testing.assert_frame_equal(actual_part, expected_part)
+        else:
+            pd.testing.assert_series_equal(actual_part, expected_part)
+    assert app.session_state["train_test_split_config"] == {"test_size": 0.2, "random_state": 42, "stratified": True}
+    assert app.session_state["split_completed"] is True
+    assert app.session_state["trained_models"] == {}
+    assert app.session_state["preprocessing_applied"] is False
+
+    app.slider(key="train_test_size_percent").set_value(25).run()
+
+    assert not app.exception, app.exception
+    assert app.session_state["split_completed"] is False
+    assert app.session_state["X_train"] is None
+    assert app.session_state["X_test"] is None
 
 
 def test_file_upload_initializes_dataset_state() -> None:
@@ -98,8 +150,12 @@ def test_primary_ctas_navigate_between_active_pages() -> None:
     dataset_cta = next(button for button in app.button if "Continue to EDA" in button.label)
     dataset_cta.click().run()
     assert app.session_state["current_page"] == "eda"
-    eda_cta = next(button for button in app.button if "Let's do preprocessing" in button.label)
+    eda_cta = next(button for button in app.button if "Train / Test Split" in button.label)
     eda_cta.click().run()
+    assert app.session_state["current_page"] == "train_test_split"
+    next(button for button in app.button if button.label == "Perform Train / Test Split").click().run()
+    assert not app.exception, app.exception
+    next(button for button in app.button if button.label == "Continue to Preprocessing →").click().run()
     assert app.session_state["current_page"] == "preprocessing"
 
 
@@ -113,6 +169,8 @@ def test_new_file_upload_clears_downstream_state() -> None:
     app.session_state["preprocessing_applied"] = True
     app.session_state["preprocessing_config"] = {"old": True}
     app.session_state["trained_models"] = {"old": {"status": "trained"}}
+    app.session_state["split_completed"] = True
+    app.session_state["X_train"] = app.session_state["dataset"].drop(columns="target")
     app.file_uploader[0].upload(
         "second.csv",
         b"score,target\n1.0,10\n2.0,20\n3.0,30\n4.0,40\n",
@@ -123,6 +181,8 @@ def test_new_file_upload_clears_downstream_state() -> None:
     assert app.session_state["preprocessing_applied"] is False
     assert not app.session_state["preprocessing_config"]
     assert not app.session_state["trained_models"]
+    assert app.session_state["split_completed"] is False
+    assert app.session_state["X_train"] is None
 
 
 def test_same_filename_with_new_contents_clears_downstream_state() -> None:
@@ -176,6 +236,7 @@ def test_preprocessing_defaults_to_all_non_target_features() -> None:
 
 def test_manual_problem_type_override_survives_page_navigation() -> None:
     dataset = pd.DataFrame({"feature": [1.0, 2.0, 3.0, 4.0], "target": [0.5, 1.5, 2.5, 3.5]})
+    split = split_dataset(dataset[["feature"]], dataset["target"], "regression")
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=15)
     for key, value in {
         "current_page": "dataset",
@@ -185,6 +246,16 @@ def test_manual_problem_type_override_survives_page_navigation() -> None:
         "target_column": "target",
         "problem_type": None,
         "detected_problem_type": None,
+        "split_completed": True,
+        "train_test_split_source": {
+            "dataset_fingerprint": None,
+            "target_column": "target",
+            "problem_type": "regression",
+        },
+        "X_train": split[0],
+        "X_test": split[1],
+        "y_train": split[2],
+        "y_test": split[3],
     }.items():
         app.session_state[key] = value
 
@@ -194,6 +265,8 @@ def test_manual_problem_type_override_survives_page_navigation() -> None:
     app.radio(key="problem_type_selector").set_value("Classification").run()
     assert not app.exception, app.exception
     assert app.session_state["problem_type"] == "classification"
+    assert app.session_state["split_completed"] is False
+    assert app.session_state["X_train"] is None
 
     next(button for button in app.button if "EDA" in button.label).click().run()
     next(button for button in app.button if "Dataset" in button.label).click().run()
@@ -212,6 +285,7 @@ def test_invalid_target_change_invalidates_previous_preprocessing_and_training()
     )
     config = PreprocessingConfig(selected_features=["feature"], target_column="valid_target", problem_type="classification")
     pipeline = build_preprocessing_pipeline(config, ["feature"], [])
+    split = split_dataset(dataset[["feature"]], dataset["valid_target"], "classification", test_size=0.5)
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=15)
     for key, value in {
         "current_page": "dataset",
@@ -227,6 +301,16 @@ def test_invalid_target_change_invalidates_previous_preprocessing_and_training()
         "preprocessing_applied": True,
         "selected_models": ["Logistic Regression"],
         "trained_models": {"Logistic Regression": {"status": "trained"}},
+        "split_completed": True,
+        "train_test_split_source": {
+            "dataset_fingerprint": None,
+            "target_column": "valid_target",
+            "problem_type": "classification",
+        },
+        "X_train": split[0],
+        "X_test": split[1],
+        "y_train": split[2],
+        "y_test": split[3],
     }.items():
         app.session_state[key] = value
 
@@ -238,6 +322,9 @@ def test_invalid_target_change_invalidates_previous_preprocessing_and_training()
     assert app.session_state["preprocessing_applied"] is False
     assert app.session_state["preprocessing_pipeline"] is None
     assert not app.session_state["trained_models"]
+    assert app.session_state["split_completed"] is False
+    assert app.session_state["X_train"] is None
+    assert app.session_state["train_test_split_source"] is None
 
 
 def test_sidebar_marks_eda_complete_only_after_visit() -> None:
@@ -303,8 +390,8 @@ def test_regression_workflow_reaches_training() -> None:
     dataset["target"] = target
     app = _seed_app(dataset, "target", "regression")
     _apply_and_train(app)
-    assert "Ridge" in app.session_state["trained_models"]
-    assert app.session_state["training_results"]["Ridge"]["status"] == "trained"
+    assert "Ridge Regression" in app.session_state["trained_models"]
+    assert app.session_state["training_results"]["Ridge Regression"]["status"] == "trained"
 
 
 def test_missing_categorical_workflow_reaches_training() -> None:
@@ -343,7 +430,8 @@ def test_model_selection_change_invalidates_training_without_rerun_error() -> No
     dataset["target"] = labels
     app = _seed_app(dataset, "target", "classification")
     _apply_and_train(app)
-    app.multiselect(key="selected_models").set_value(["Random Forest"]).run()
+    next(button for button in app.button if button.key == "nav_models").click().run()
+    app.multiselect(key="model_selection_widget").set_value(["Random Forest"]).run()
     assert not app.exception, app.exception
     assert not app.session_state["trained_models"]
 
@@ -352,7 +440,7 @@ def test_model_selection_change_invalidates_training_without_rerun_error() -> No
     ("problem_type", "target_values", "select_model"),
     [
         ("classification", [0, 1, 0, 1, 0, 1, 0, 1], "Logistic Regression"),
-        ("regression", [10.0, 20.0, 25.0, 35.0, 42.0, 53.0, 61.0, 75.0], "Ridge"),
+        ("regression", [10.0, 20.0, 25.0, 35.0, 42.0, 53.0, 61.0, 75.0], "Ridge Regression"),
     ],
 )
 def test_models_ui_filters_registry_and_preserves_card_selection(
@@ -413,10 +501,99 @@ def test_models_ui_filters_registry_and_preserves_card_selection(
     next(button for button in app.button if button.key == toggle_key).click().run()
     assert not app.exception, app.exception
     assert app.session_state["selected_models"] == [select_model]
-
     app.selectbox(key="model_family_filter").select("Tree-Based").run()
     assert not app.exception, app.exception
     assert app.session_state["selected_models"] == [select_model]
+
+
+def test_registry_only_model_registration_drives_model_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    model_name = "Registry Probe"
+    monkeypatch.setitem(
+        MODEL_REGISTRY,
+        model_name,
+        ModelMetadata(
+            name=model_name,
+            problem_type="classification",
+            family="Registry Tests",
+            description="A model added only through registry metadata.",
+            default_parameters={"C": 1.75},
+            constructors={"classification": LogisticRegression},
+            parameter_schema=(ModelParameter("C", "C", "float", minimum=0.0001, step=0.1),),
+        ),
+    )
+    dataset = pd.DataFrame({"value": [1.0, 2.0, 3.0, 4.0], "target": [0, 1, 0, 1]})
+    config = PreprocessingConfig(selected_features=["value"], target_column="target", problem_type="classification")
+    pipeline = build_preprocessing_pipeline(config, ["value"], [])
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=20)
+    for key, value in {
+        "current_page": "models",
+        "dataset": dataset,
+        "dataset_valid": True,
+        "target_column": "target",
+        "problem_type": "classification",
+        "detected_problem_type": "classification",
+        "selected_features": ["value"],
+        "preprocessing_pipeline": pipeline,
+        "preprocessing_config": config.to_dict(),
+        "preprocessing_applied": True,
+    }.items():
+        app.session_state[key] = value
+
+    app.run()
+
+    assert not app.exception, app.exception
+    assert get_available_models("classification").count(model_name) == 1
+    assert any(model_name in item.value for item in app.markdown)
+    app.text_input(key="model_search").set_value(model_name).run()
+    app.multiselect(key="model_selection_widget").set_value([model_name]).run()
+    assert not app.exception, app.exception
+    control_key = "model_param_registry_probe_C"
+    assert app.number_input(key=control_key).value == 1.75
+    app.number_input(key=control_key).set_value(2.25).run()
+    assert app.session_state["model_configs"][model_name]["C"] == 2.25
+    assert isinstance(LogisticRegression(**app.session_state["model_configs"][model_name]), LogisticRegression)
+    assert isinstance(create_model(model_name, "classification"), LogisticRegression)
+    app.multiselect(key="model_selection_widget").set_value([]).run()
+    assert app.session_state["model_configs"][model_name]["C"] == 2.25
+    app.multiselect(key="model_selection_widget").set_value([model_name]).run()
+    assert app.number_input(key=control_key).value == 2.25
+
+
+def test_model_type_filter_keeps_selections_scoped_by_problem_type() -> None:
+    dataset = pd.DataFrame({"value": [1.0, 2.0, 3.0, 4.0], "target": [0, 1, 0, 1]})
+    config = PreprocessingConfig(selected_features=["value"], target_column="target", problem_type="classification")
+    pipeline = build_preprocessing_pipeline(config, ["value"], [])
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=20)
+    for key, value in {
+        "current_page": "models",
+        "dataset": dataset,
+        "dataset_valid": True,
+        "target_column": "target",
+        "problem_type": "classification",
+        "detected_problem_type": "classification",
+        "selected_features": ["value"],
+        "selected_models": ["Logistic Regression"],
+        "preprocessing_pipeline": pipeline,
+        "preprocessing_config": config.to_dict(),
+        "preprocessing_applied": True,
+    }.items():
+        app.session_state[key] = value
+
+    app.run()
+    assert not app.exception, app.exception
+    assert app.selectbox(key="model_type_filter").value == "Classification"
+    app.selectbox(key="model_type_filter").select("Regression").run()
+    assert not app.exception, app.exception
+    assert any("12 compatible models" in item.value for item in app.caption)
+    app.multiselect(key="model_selection_widget").set_value(["Ridge Regression"]).run()
+    assert not app.exception, app.exception
+    assert app.session_state["selected_models"] == ["Logistic Regression"]
+    assert app.session_state["selected_models_by_type"]["regression"] == ["Ridge Regression"]
+
+    app.selectbox(key="model_type_filter").select("Classification").run()
+
+    assert not app.exception, app.exception
+    assert app.multiselect(key="model_selection_widget").value == ["Logistic Regression"]
 
 
 def test_regression_models_with_shared_parameter_controls_have_unique_widgets() -> None:
@@ -445,13 +622,13 @@ def test_regression_models_with_shared_parameter_controls_have_unique_widgets() 
         "preprocessing_pipeline": pipeline,
         "preprocessing_config": config.to_dict(),
         "preprocessing_applied": True,
-        "selected_models": ["Decision Tree", "Decision Tree Regressor"],
+        "selected_models": ["Decision Tree Regressor", "Random Forest Regressor"],
     }.items():
         app.session_state[key] = value
 
     app.run()
     assert not app.exception, app.exception
-    assert app.session_state["selected_models"] == ["Decision Tree", "Decision Tree Regressor"]
+    assert app.session_state["selected_models"] == ["Decision Tree Regressor", "Random Forest Regressor"]
 
 
 def _run_csv_training_workflow(
@@ -470,30 +647,53 @@ def _run_csv_training_workflow(
 
     next(button for button in app.button if "Continue to EDA" in button.label).click().run()
     assert not app.exception, app.exception
-    next(button for button in app.button if "Let's do preprocessing" in button.label).click().run()
+    next(button for button in app.button if "Train / Test Split" in button.label).click().run()
+    assert app.slider(key="train_test_size_percent").value == 20
+    assert app.number_input(key="train_random_state").value == 42
+    app.slider(key="train_test_size_percent").set_value(30).run()
+    app.number_input(key="train_random_state").set_value(7).run()
+    next(button for button in app.button if button.label == "Perform Train / Test Split").click().run()
+    assert not app.exception, app.exception
+    next(button for button in app.button if button.label == "Continue to Preprocessing →").click().run()
     assert not app.exception, app.exception
     next(button for button in app.button if "Apply preprocessing configuration" in button.label).click().run()
     assert not app.exception, app.exception
     assert app.session_state["preprocessing_applied"] is True
     next(button for button in app.button if "Configure models" in button.label).click().run()
     assert not app.exception, app.exception
-    assert app.selectbox(key="train_test_size").value == 0.2
-    assert app.number_input(key="train_random_state").value == 42
 
-    app.multiselect(key="selected_models").set_value([model_name]).run()
+    app.multiselect(key="model_selection_widget").set_value([model_name]).run()
     assert not app.exception, app.exception
     parameter_name, parameter_key, parameter_value = (
-        ("C", "model_Logistic Regression_c", 2.5)
+        ("C", "model_param_logistic_regression_C", 2.5)
         if model_name == "Logistic Regression"
-        else ("alpha", "model_ridge_alpha", 2.5)
+        else ("alpha", "model_param_ridge_regression_alpha", 2.5)
     )
     app.number_input(key=parameter_key).set_value(parameter_value).run()
-    app.selectbox(key="train_test_size").select(0.3).run()
-    app.number_input(key="train_random_state").set_value(7).run()
+    next(button for button in app.button if button.label == "Continue to Training →").click().run()
+    app.selectbox(key="training_validation_strategy").set_value("K-Fold Cross-Validation").run()
+    protected_X_test = app.session_state["X_test"].copy(deep=True)
+    protected_y_test = app.session_state["y_test"].copy(deep=True)
     next(button for button in app.button if "Train selected models" in button.label).click().run()
     assert not app.exception, app.exception
-    assert model_name in app.session_state["trained_models"]
+    assert model_name in app.session_state["trained_models"], (
+        app.session_state["current_page"],
+        app.session_state["selected_models"],
+        app.session_state["split_completed"],
+        app.session_state["model_configs"],
+        app.session_state["training_results"],
+        [item.value for item in app.error],
+    )
     assert app.session_state["training_results"][model_name]["status"] == "trained"
+    model_state = app.session_state["trained_models"][model_name]
+    assert model_state["training_time_seconds"] > 0
+    assert model_state["cv_configuration"]["cv_folds"] == 5
+    assert len(model_state["cv_metrics"]["accuracy"]["fold_scores"] if expected_problem_type == "classification" else model_state["cv_metrics"]["r2"]["fold_scores"]) == 5
+    assert model_state["parameters"][parameter_name] == parameter_value
+    assert app.session_state["training_results"][model_name]["training_metrics"]
+    assert app.session_state["training_results"][model_name]["cv_metrics"]
+    pd.testing.assert_frame_equal(app.session_state["X_test"], protected_X_test)
+    pd.testing.assert_series_equal(app.session_state["y_test"], protected_y_test)
     estimator = app.session_state["trained_models"][model_name]["pipeline"].named_steps["model"]
     assert estimator.get_params()[parameter_name] == parameter_value
     loaded_dataset = app.session_state["dataset"]
@@ -508,6 +708,115 @@ def _run_csv_training_workflow(
     return app
 
 
+def test_training_page_never_reads_protected_holdout() -> None:
+    dataset = pd.DataFrame({"value": np.arange(40, dtype=float), "target": [0, 1] * 20})
+    config = PreprocessingConfig(selected_features=["value"], target_column="target", problem_type="classification")
+    pipeline = build_preprocessing_pipeline(config, ["value"], [])
+    X_train = dataset[["value"]].iloc[:32].copy()
+    y_train = dataset["target"].iloc[:32].copy()
+    protected_X_test = object()
+    protected_y_test = object()
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=20)
+    for key, value in {
+        "current_page": "training",
+        "dataset": dataset,
+        "dataset_valid": True,
+        "target_column": "target",
+        "problem_type": "classification",
+        "detected_problem_type": "classification",
+        "dataset_fingerprint": "training-only-test",
+        "selected_features": ["value"],
+        "selected_models": ["Logistic Regression"],
+        "model_configs": {"Logistic Regression": {"C": 1.0, "max_iter": 1000}},
+        "preprocessing_pipeline": pipeline,
+        "preprocessing_config": config.to_dict(),
+        "preprocessing_applied": True,
+        "split_completed": True,
+        "train_test_split_source": {
+            "dataset_fingerprint": "training-only-test",
+            "target_column": "target",
+            "problem_type": "classification",
+        },
+        "X_train": X_train,
+        "y_train": y_train,
+        "X_test": protected_X_test,
+        "y_test": protected_y_test,
+    }.items():
+        app.session_state[key] = value
+
+    app.run()
+    assert not app.exception, app.exception
+    assert next(item for item in app.selectbox if item.label == "Validation strategy").value == "None"
+    assert not any(item.key == "training_cv_folds" for item in app.number_input)
+    assert app.number_input(key="training_random_state").value == 42
+    assert not any(item.key == "training_shuffle_folds" for item in app.checkbox)
+    assert any("TEST DATA PROTECTED" in item.value for item in app.markdown)
+    next(button for button in app.button if button.label == "Train selected models").click().run()
+
+    assert not app.exception, app.exception
+    assert app.session_state["training_results"]["Logistic Regression"]["status"] == "trained"
+    assert app.session_state["training_results"]["Logistic Regression"]["cv_metrics"] is None
+    assert app.session_state["training_results"]["Logistic Regression"]["diagnostic"]["status"] == "unavailable"
+    assert app.session_state["X_test"] is protected_X_test
+    assert app.session_state["y_test"] is protected_y_test
+    rendered_markdown = "\n".join(item.value for item in app.markdown)
+    assert "Protected test dataset size" in rendered_markdown
+    assert "8 rows" in rendered_markdown
+    assert "Trained Models (1)" in rendered_markdown
+    assert "Model comparison" in rendered_markdown
+    assert "Next Steps" in rendered_markdown
+    assert any(button.label == "Continue to Tuning →" for button in app.button)
+
+
+def test_training_ui_can_disable_cross_validation() -> None:
+    dataset = pd.DataFrame({"value": np.arange(40, dtype=float), "target": [0, 1] * 20})
+    config = PreprocessingConfig(selected_features=["value"], target_column="target", problem_type="classification")
+    pipeline = build_preprocessing_pipeline(config, ["value"], [])
+    X_train = dataset[["value"]].iloc[:32].copy()
+    y_train = dataset["target"].iloc[:32].copy()
+    app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=20)
+    for key, value in {
+        "current_page": "training",
+        "dataset": dataset,
+        "dataset_valid": True,
+        "target_column": "target",
+        "problem_type": "classification",
+        "detected_problem_type": "classification",
+        "dataset_fingerprint": "no-cv-training-test",
+        "selected_features": ["value"],
+        "selected_models": ["Logistic Regression", "Random Forest"],
+        "model_configs": {},
+        "preprocessing_pipeline": pipeline,
+        "preprocessing_config": config.to_dict(),
+        "preprocessing_applied": True,
+        "split_completed": True,
+        "train_test_split_source": {
+            "dataset_fingerprint": "no-cv-training-test",
+            "target_column": "target",
+            "problem_type": "classification",
+        },
+        "X_train": X_train,
+        "y_train": y_train,
+        "X_test": object(),
+        "y_test": object(),
+    }.items():
+        app.session_state[key] = value
+
+    app.run()
+    assert not app.exception, app.exception
+    next(button for button in app.button if button.label == "Train selected models").click().run()
+
+    assert not app.exception, app.exception
+    assert set(app.session_state["trained_models"]) == {"Logistic Regression", "Random Forest"}
+    assert app.session_state["cv_configuration"] is None
+    assert all(
+        result["cv_metrics"] is None and not result["validation_metrics_available"]
+        for result in app.session_state["training_results"].values()
+    )
+    assert sum(item["percentage"] for item in app.session_state["training_class_distribution"]) == pytest.approx(100)
+    assert "Validation metrics are unavailable" in "\n".join(item.value for item in app.info)
+
+
 def test_real_breast_cancer_csv_completes_classification_workflow() -> None:
     frame = load_breast_cancer(as_frame=True).frame
     _run_csv_training_workflow("breast_cancer.csv", frame, "classification", "Logistic Regression")
@@ -515,7 +824,7 @@ def test_real_breast_cancer_csv_completes_classification_workflow() -> None:
 
 def test_real_diabetes_csv_completes_regression_workflow() -> None:
     frame = load_diabetes(as_frame=True).frame
-    _run_csv_training_workflow("diabetes.csv", frame, "regression", "Ridge")
+    _run_csv_training_workflow("diabetes.csv", frame, "regression", "Ridge Regression")
 
 
 def test_all_model_training_failures_are_shown_in_models_ui() -> None:
@@ -527,9 +836,10 @@ def test_all_model_training_failures_are_shown_in_models_ui() -> None:
     )
     config = PreprocessingConfig(selected_features=["value"], target_column="target", problem_type="classification")
     pipeline = build_preprocessing_pipeline(config, ["value"], [])
+    partitions = split_dataset(dataset[["value"]], dataset["target"], "classification")
     app = AppTest.from_file(Path(__file__).parents[1] / "app.py", default_timeout=20)
     for key, value in {
-        "current_page": "models",
+        "current_page": "training",
         "dataset": dataset,
         "dataset_name": "negative-counts.csv",
         "dataset_valid": True,
@@ -540,7 +850,18 @@ def test_all_model_training_failures_are_shown_in_models_ui() -> None:
         "preprocessing_pipeline": pipeline,
         "preprocessing_config": config.to_dict(),
         "preprocessing_applied": True,
-        "selected_models": ["Multinomial Naive Bayes"],
+        "selected_models": ["Logistic Regression"],
+        "model_configs": {"Logistic Regression": {"C": 0}},
+        "split_completed": True,
+        "train_test_split_source": {
+            "dataset_fingerprint": None,
+            "target_column": "target",
+            "problem_type": "classification",
+        },
+        "X_train": partitions[0],
+        "X_test": partitions[1],
+        "y_train": partitions[2],
+        "y_test": partitions[3],
     }.items():
         app.session_state[key] = value
 
@@ -549,5 +870,5 @@ def test_all_model_training_failures_are_shown_in_models_ui() -> None:
 
     assert not app.exception, app.exception
     assert not app.session_state["trained_models"]
-    assert app.session_state["training_results"]["Multinomial Naive Bayes"]["status"] == "failed"
+    assert app.session_state["training_results"]["Logistic Regression"]["status"] == "failed"
     assert any("None of the selected models trained successfully" in item.value for item in app.error)

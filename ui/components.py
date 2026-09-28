@@ -9,8 +9,10 @@ from config.settings import APP_NAME, APP_SUBTITLE, APP_TAGLINE
 PAGE_LABELS = {
 	"dataset": "Dataset",
 	"eda": "EDA",
+	"train_test_split": "Train / Test Split",
 	"preprocessing": "Preprocessing",
 	"models": "Models",
+	"training": "Training",
 	"tuning": "Tuning",
 	"evaluation": "Evaluation",
 	"mlflow": "MLflow",
@@ -20,13 +22,52 @@ PAGE_LABELS = {
 PAGE_ICONS = {
 	"dataset": "database",
 	"eda": "analytics",
+	"train_test_split": "shuffle",
 	"preprocessing": "tune",
 	"models": "model_training",
+	"training": "play_arrow",
 	"tuning": "auto_awesome",
 	"evaluation": "assessment",
 	"mlflow": "monitoring",
 	"prediction": "lightbulb",
 }
+
+def render_workflow_progress(active_page: str) -> None:
+	"""Show the ordered workflow and mark completed stages from session state."""
+	completed = {
+		"dataset": bool(st.session_state.get("dataset_valid")),
+		"eda": "eda" in st.session_state.get("visited_pages", []),
+		"train_test_split": bool(st.session_state.get("split_completed")),
+		"preprocessing": bool(st.session_state.get("preprocessing_applied")),
+		"models": bool(st.session_state.get("selected_models")),
+		"training": bool(st.session_state.get("trained_models")),
+		"tuning": False,
+		"evaluation": bool(st.session_state.get("evaluation_results")),
+		"mlflow": bool(st.session_state.get("mlflow_run_information")),
+		"prediction": st.session_state.get("best_pipeline") is not None,
+	}
+	steps = []
+	for index, (page, label) in enumerate(PAGE_LABELS.items(), start=1):
+		state = "active" if page == active_page else ("complete" if completed[page] else "upcoming")
+		marker = "✓" if state == "complete" else str(index)
+		steps.append(
+			f'<div class="workflow-step {state}"><span class="workflow-marker">{marker}</span>'
+			f'<span class="workflow-label">{label}</span></div>'
+		)
+	st.markdown(
+		"""
+		<style>
+		.workflow-progress { display: grid; grid-template-columns: repeat(10, minmax(5rem, 1fr)); gap: .2rem; margin: 0 0 1.2rem; padding: .6rem .35rem; overflow-x: auto; border: 1px solid var(--ml-border); border-radius: 10px; background: var(--ml-panel); }
+		.workflow-step { position: relative; display: flex; min-width: 5rem; flex-direction: column; align-items: center; gap: .3rem; color: var(--ml-muted); font-size: .65rem; }
+		.workflow-marker { display: grid; place-items: center; width: 1.4rem; height: 1.4rem; border: 1px solid var(--ml-border); border-radius: 50%; background: var(--ml-panel-soft); font-size: .7rem; font-weight: 700; }
+		.workflow-step.complete .workflow-marker { border-color: transparent; background: #16a34a; color: white; }
+		.workflow-step.active { color: var(--ml-primary); font-weight: 700; }
+		.workflow-step.active .workflow-marker { border-color: var(--ml-primary); background: var(--ml-primary); color: white; }
+		.workflow-label { white-space: nowrap; }
+		</style>
+		<div class="workflow-progress">""" + "".join(steps) + "</div>",
+		unsafe_allow_html=True,
+	)
 
 
 def inject_theme() -> None:
