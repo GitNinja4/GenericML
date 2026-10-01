@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from src.models.registry import ModelMetadata, ModelParameter, get_available_models, get_model_families, get_model_metadata, get_models_by_family
-from ui.components import navigate, render_cta, render_empty_state, render_page_header, render_stat_cards, render_workflow_progress
+from ui.components import navigate, render_cta, render_empty_state, render_page_header, render_stat_cards
 
 
 def _parameter_widget_key(model_name: str, parameter_name: str) -> str:
@@ -64,10 +64,6 @@ def _clear_training_state() -> None:
 	st.session_state["trained_models"] = {}
 	st.session_state["training_results"] = {}
 	st.session_state["training_configuration_signature"] = None
-
-
-def _render_workflow_progress() -> None:
-	render_workflow_progress("models")
 
 
 def _toggle_model_selection(model_name: str) -> None:
@@ -222,7 +218,7 @@ def render_models_tab() -> None:
 	"""Render model selection and explicit training controls."""
 	dataset = st.session_state.get("dataset")
 	if dataset is None:
-		render_page_header("Select and configure models", "Choose models for the detected problem type and configure their parameters.", "05 · Models")
+		render_page_header("Model Selection", "Choose and configure the machine learning models.", "05 · Models")
 		render_empty_state("No dataset available", "Upload a dataset before selecting models.", "model_training")
 		return
 	problem_type = st.session_state.get("problem_type") or st.session_state.get("detected_problem_type")
@@ -247,10 +243,9 @@ def render_models_tab() -> None:
 	st.session_state["selected_models_by_type"] = selected_by_type
 	st.session_state["selected_models"] = selected_by_type[problem_type]
 
-	_render_workflow_progress()
 	page_heading, dataset_column = st.columns([2.8, 1], vertical_alignment="center")
 	with page_heading:
-		render_page_header("Select and configure models", "Choose compatible algorithms and configure them from registered parameter controls.", "05 · Models")
+		render_page_header("Model Selection", "Choose and configure the machine learning models.", "05 · Models")
 	with dataset_column:
 		_render_dataset_information(dataset, target_column, problem_type)
 
@@ -261,8 +256,7 @@ def render_models_tab() -> None:
 			("Problem type", problem_type.title()),
 			("Target column", target_column),
 			("Features", len(selected_features)),
-			("Training samples", f"{train_samples:,}" if train_samples else "Split pending"),
-			("Test samples", f"{test_samples:,}" if test_samples else "Split pending"),
+			("Training / test rows", f"{train_samples:,} / {test_samples:,}" if train_samples else "Split pending"),
 		]
 	)
 

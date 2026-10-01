@@ -48,6 +48,26 @@ def _remove_training_outliers(
 	return X_train.iloc[keep_mask].copy(), y_train.iloc[keep_mask].copy(), removed_rows
 
 
+def _remove_training_missing_values(
+	X_train: pd.DataFrame,
+	y_train: pd.Series,
+	preprocessing_config: dict[str, Any] | None,
+) -> tuple[pd.DataFrame, pd.Series, int]:
+	"""Drop configured missing-value rows from training data only."""
+	config = preprocessing_config or {}
+	drop_columns: list[str] = []
+	if config.get("numeric_missing_strategy") == "Drop":
+		drop_columns.extend(X_train.select_dtypes(include="number").columns.tolist())
+	if config.get("categorical_missing_strategy") == "Drop":
+		drop_columns.extend(X_train.select_dtypes(include=["object", "category", "string", "bool"]).columns.tolist())
+	drop_columns = [column for column in dict.fromkeys(drop_columns) if column in X_train.columns]
+	if not drop_columns:
+		return X_train, y_train, 0
+	keep_mask = ~X_train[drop_columns].isna().any(axis=1)
+	removed_rows = int((~keep_mask).sum())
+	return X_train.loc[keep_mask].copy(), y_train.loc[keep_mask].copy(), removed_rows
+
+
 def _metric_values(
 	y_true: pd.Series,
 	y_predicted: np.ndarray,
@@ -244,7 +264,8 @@ def train_models(
 					y_fold_train = y_train.iloc[train_indices]
 					X_fold_validation = X_train.iloc[validation_indices]
 					y_fold_validation = y_train.iloc[validation_indices]
-					X_fold_fit, y_fold_fit, _ = _remove_training_outliers(X_fold_train, y_fold_train, config)
+					X_fold_fit, y_fold_fit, _ = _remove_training_missing_values(X_fold_train, y_fold_train, config)
+					X_fold_fit, y_fold_fit, _ = _remove_training_outliers(X_fold_fit, y_fold_fit, config)
 					if len(X_fold_fit) < 1:
 						raise ValueError("Outlier removal excluded every row in a CV training fold.")
 					fold_pipeline = build_model_pipeline(
@@ -271,7 +292,8 @@ def train_models(
 							X_fold_validation,
 						)
 					)
-			X_fit, y_fit, outlier_rows_removed = _remove_training_outliers(X_train, y_train, config)
+			X_fit, y_fit, missing_rows_removed = _remove_training_missing_values(X_train, y_train, config)
+			X_fit, y_fit, outlier_rows_removed = _remove_training_outliers(X_fit, y_fit, config)
 			if X_fit.empty:
 				raise ValueError("Outlier removal excluded every training row.")
 			pipeline = build_model_pipeline(
@@ -311,6 +333,7 @@ def train_models(
 				"training_time_seconds": duration,
 				"final_fit_samples": len(X_fit),
 				"outlier_rows_removed": outlier_rows_removed,
+				"missing_rows_removed": missing_rows_removed,
 				"training_metrics": training_metrics,
 				"cv_training_metrics": cv_training_metrics,
 				"cv_metrics": cv_metrics,

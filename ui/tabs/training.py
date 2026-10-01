@@ -10,7 +10,7 @@ import streamlit as st
 from src.models.model_factory import create_model
 from src.training.workflow import train_models
 from src.utils.logging import get_logger
-from ui.components import navigate, render_cta, render_empty_state, render_page_header, render_workflow_progress
+from ui.components import navigate, render_cta, render_empty_state, render_page_header
 
 logger = get_logger(__name__)
 
@@ -130,6 +130,7 @@ def _model_card(model_name: str, result: dict[str, object], problem_type: str, s
 			st.write(f"Oversampling: {result.get('sampling_method', 'Disabled')}")
 			st.write(f"Validation strategy: {result.get('validation_strategy', 'None')}")
 			st.write(f"Final fit samples: {result.get('final_fit_samples', 0):,}")
+			st.write(f"Training rows removed as missing: {result.get('missing_rows_removed', 0):,}")
 			st.write(f"Training rows removed as outliers: {result.get('outlier_rows_removed', 0):,}")
 			if result.get("validation_metrics_available"):
 				st.markdown("**Individual fold scores**")
@@ -146,10 +147,9 @@ def render_training_tab() -> None:
 	dataset = st.session_state.get("dataset")
 	problem_type = st.session_state.get("problem_type") or st.session_state.get("detected_problem_type")
 	target_column = st.session_state.get("target_column")
-	render_workflow_progress("training")
 	heading_column, protection_column = st.columns([2.3, 1], vertical_alignment="center")
 	with heading_column:
-		render_page_header("Train Selected Models", "Train the selected models using training data only. Review validation metrics before deciding whether tuning is needed.", "06 · Training")
+		render_page_header("Training", "Train the selected models using training data only.", "06 · Training")
 	with protection_column:
 		with st.container(border=True):
 			st.markdown("🔒 **TEST DATA PROTECTED**")
@@ -219,7 +219,6 @@ def render_training_tab() -> None:
 	if problem_type == "regression" and not pd.api.types.is_numeric_dtype(y_train.dtype):
 		st.error("Regression training requires a numeric target.")
 		return
-
 	metric_options = CLASSIFICATION_SCORING if problem_type == "classification" else REGRESSION_SCORING
 	default_metric = "accuracy" if problem_type == "classification" else "r2"
 	if st.session_state.get("training_scoring_metric") not in metric_options:
@@ -237,70 +236,81 @@ def render_training_tab() -> None:
 	samplers = ["Disabled", "SMOTE", "SMOTENC"]
 	if st.session_state.get("training_sampling_method") not in samplers:
 		st.session_state["training_sampling_method"] = "Disabled"
-	with st.container(border=True):
-		st.markdown("#### Training configuration")
-		strategy_column, sampler_column, seed_column = st.columns([1.2, 1, 0.8])
-		validation_strategy = strategy_column.selectbox(
-			"Validation strategy",
-			validation_options,
-			key="training_validation_strategy",
-		)
-		sampling_method = "Disabled"
-		if problem_type == "classification":
-			sampling_method = sampler_column.selectbox(
-				"Oversampling",
-				samplers,
-				key="training_sampling_method",
+	configuration_column, balance_column, overview_column = st.columns([1.15, 1, 0.9], vertical_alignment="top")
+	with configuration_column:
+		with st.container(border=True):
+			st.markdown("#### Training configuration")
+			validation_strategy = st.selectbox(
+				"Validation strategy",
+				validation_options,
+				key="training_validation_strategy",
 			)
-			st.markdown("**Class Imbalance Handling**")
-		else:
-			sampler_column.caption("Oversampling is for classification only.")
-		random_state = seed_column.number_input("Random state", min_value=0, step=1, key="training_random_state")
-		if problem_type == "classification":
-			class_counts = y_train.value_counts()
-			imbalance_ratio = float(class_counts.max() / class_counts.min())
-			st.markdown("**Training target distribution**")
-			st.dataframe(
-				pd.DataFrame(
-					{
-						"Class": class_counts.index.astype(str),
-						"Training rows": class_counts.values,
-						"Training share": [f"{value / len(y_train):.1%}" for value in class_counts.values],
-					}
-				),
-				width="stretch",
-				hide_index=True,
-			)
-			if imbalance_ratio >= 1.5:
-				st.warning(f"Class imbalance detected (largest/smallest class ratio: {imbalance_ratio:.2f}). Oversampling is optional; review the impact before enabling it.")
+			random_state = st.number_input("Random state", min_value=0, step=1, key="training_random_state")
+			if validation_strategy == "K-Fold Cross-Validation":
+				cv_folds = st.number_input("Number of folds", min_value=2, max_value=max_folds, step=1, key="training_cv_folds")
+				shuffle = st.checkbox("Shuffle folds", key="training_shuffle_folds")
+				use_default_scoring = st.checkbox("Use default scoring", key="training_use_default_scoring")
+				if use_default_scoring:
+					st.session_state["training_scoring_metric"] = default_metric
+					st.caption(f"Scoring metric: **{metric_options[default_metric]}**")
+				else:
+					st.selectbox(
+						"Scoring metric",
+						list(metric_options),
+						key="training_scoring_metric",
+						format_func=lambda value: metric_options[value],
+					)
+				if problem_type == "classification":
+					st.caption("Stratified folds preserve class proportions. Each fold fits its own preprocessing and sampling.")
+				else:
+					st.caption("Preprocessing is fitted independently inside each training fold.")
 			else:
-				st.caption(f"No substantial class imbalance detected (ratio: {imbalance_ratio:.2f}).")
-			st.caption("SMOTE is available for numerical features. SMOTENC is selected when categorical features are present. Sampling is disabled unless explicitly chosen.")
-		if validation_strategy == "K-Fold Cross-Validation":
-			fold_column, shuffle_column, scoring_column = st.columns([0.8, 0.8, 1.2])
-			cv_folds = fold_column.number_input("Number of folds", min_value=2, max_value=max_folds, step=1, key="training_cv_folds")
-			shuffle = shuffle_column.checkbox("Shuffle folds", key="training_shuffle_folds")
-			use_default_scoring = scoring_column.checkbox("Use default scoring", key="training_use_default_scoring")
-			if use_default_scoring:
-				st.session_state["training_scoring_metric"] = default_metric
-				st.caption(f"Scoring metric: **{metric_options[default_metric]}**")
-			else:
-				st.selectbox(
-					"Scoring metric",
-					list(metric_options),
-					key="training_scoring_metric",
-					format_func=lambda value: metric_options[value],
-				)
+				cv_folds = 0
+				shuffle = False
+				st.info("Without cross-validation, training metrics alone cannot assess generalization.")
+			if max_folds < 2:
+				st.warning("K-Fold validation requires at least two rows per class/fold.")
+	with balance_column:
+		with st.container(border=True):
+			st.markdown("#### Class imbalance handling")
+			sampling_method = "Disabled"
 			if problem_type == "classification":
-				st.caption("Stratified folds preserve class proportions. Sampling and preprocessing are fitted independently inside each fold.")
+				sampling_method = st.selectbox(
+					"Oversampling",
+					samplers,
+					key="training_sampling_method",
+				)
+				class_counts = y_train.value_counts()
+				imbalance_ratio = float(class_counts.max() / class_counts.min())
+				if imbalance_ratio >= 1.5:
+					st.warning(f"Training class ratio is {imbalance_ratio:.2f}. Oversampling is optional.")
+				else:
+					st.caption(f"Class ratio: {imbalance_ratio:.2f}; no substantial imbalance detected.")
+				st.caption("SMOTE supports numeric features; choose SMOTENC when categorical features are present.")
 			else:
-				st.caption("Sampling and preprocessing are fitted independently inside each training fold.")
-		else:
-			cv_folds = 0
-			shuffle = False
-			st.info("Validation metrics are unavailable. Models will be fitted once using training data only; training metrics alone cannot assess generalization.")
-		if max_folds < 2:
-			st.warning("K-Fold validation is unavailable because the training partition does not contain at least two rows per class/fold.")
+				st.caption("Oversampling is available for classification only.")
+	with overview_column:
+		with st.container(border=True):
+			st.markdown("#### Training data overview")
+			st.metric("Training samples", f"{len(train_features):,}")
+			st.metric("Test samples · protected", f"{len(st.session_state['X_test']):,}")
+			st.metric("Features", len(selected_features))
+			st.caption(f"Problem type: **{problem_type.title()}**")
+			if problem_type == "classification":
+				class_counts = y_train.value_counts()
+				st.markdown("**Training class distribution**")
+				st.dataframe(
+					pd.DataFrame(
+						{
+							"Class": class_counts.index.astype(str),
+							"Rows": class_counts.values,
+							"Share": [f"{value / len(y_train):.1%}" for value in class_counts.values],
+						}
+					),
+					width="stretch",
+					hide_index=True,
+				)
+			st.caption("Training, validation, preprocessing, and sampling never use the protected test set.")
 
 	cv_config = {
 		"validation_strategy": validation_strategy,
@@ -326,7 +336,7 @@ def render_training_tab() -> None:
 			navigate("models")
 	with run_column:
 		train_clicked = st.button(
-			"Train selected models",
+			"Train Selected Models",
 			key="train_selected_models",
 			type="primary",
 			width="stretch",

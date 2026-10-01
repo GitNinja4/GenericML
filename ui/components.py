@@ -41,7 +41,7 @@ def render_workflow_progress(active_page: str) -> None:
 		"preprocessing": bool(st.session_state.get("preprocessing_applied")),
 		"models": bool(st.session_state.get("selected_models")),
 		"training": bool(st.session_state.get("trained_models")),
-		"tuning": False,
+		"tuning": bool(st.session_state.get("tuning_results") or st.session_state.get("tuned_models")),
 		"evaluation": bool(st.session_state.get("evaluation_results")),
 		"mlflow": bool(st.session_state.get("mlflow_run_information")),
 		"prediction": st.session_state.get("best_pipeline") is not None,
@@ -57,12 +57,14 @@ def render_workflow_progress(active_page: str) -> None:
 	st.markdown(
 		"""
 		<style>
-		.workflow-progress { display: grid; grid-template-columns: repeat(10, minmax(5rem, 1fr)); gap: .2rem; margin: 0 0 1.2rem; padding: .6rem .35rem; overflow-x: auto; border: 1px solid var(--ml-border); border-radius: 10px; background: var(--ml-panel); }
-		.workflow-step { position: relative; display: flex; min-width: 5rem; flex-direction: column; align-items: center; gap: .3rem; color: var(--ml-muted); font-size: .65rem; }
-		.workflow-marker { display: grid; place-items: center; width: 1.4rem; height: 1.4rem; border: 1px solid var(--ml-border); border-radius: 50%; background: var(--ml-panel-soft); font-size: .7rem; font-weight: 700; }
-		.workflow-step.complete .workflow-marker { border-color: transparent; background: #16a34a; color: white; }
-		.workflow-step.active { color: var(--ml-primary); font-weight: 700; }
-		.workflow-step.active .workflow-marker { border-color: var(--ml-primary); background: var(--ml-primary); color: white; }
+		.workflow-progress { display: grid; grid-template-columns: repeat(10, minmax(4.25rem, 1fr)); gap: .15rem; margin: 0 0 .65rem; padding: .42rem .35rem; overflow-x: auto; border: 1px solid var(--ml-border); border-radius: 7px; background: #0b1929; }
+		.workflow-step { position: relative; display: flex; min-width: 4.25rem; flex-direction: column; align-items: center; gap: .2rem; color: var(--ml-muted); font-size: .62rem; }
+		.workflow-step:not(:last-child)::after { content: ""; position: absolute; top: .72rem; left: 58%; width: 84%; height: 1px; background: rgba(148, 163, 184, .25); z-index: 0; }
+		.workflow-marker { position: relative; z-index: 1; display: grid; place-items: center; width: 1.3rem; height: 1.3rem; border: 1px solid rgba(148, 163, 184, .38); border-radius: 50%; background: #172033; color: #94a3b8; font-size: .66rem; font-weight: 800; }
+		.workflow-step.complete { color: #86efac; }
+		.workflow-step.complete .workflow-marker { border-color: transparent; background: var(--ml-success); color: white; }
+		.workflow-step.active { color: #c4b5fd; font-weight: 700; }
+		.workflow-step.active .workflow-marker { border-color: #a78bfa; background: var(--ml-accent); color: white; box-shadow: 0 0 0 3px rgba(147, 51, 234, .18); }
 		.workflow-label { white-space: nowrap; }
 		</style>
 		<div class="workflow-progress">""" + "".join(steps) + "</div>",
@@ -78,31 +80,31 @@ def inject_theme() -> None:
 		:root {
 			--ml-primary: #2563eb;
 			--ml-primary-strong: #1d4ed8;
-			--ml-primary-soft: #dbeafe;
-			--ml-accent: #8b5cf6;
-			--ml-navy: #0b1220;
-			--ml-navy-soft: #111827;
-			--ml-success: #16a34a;
-			--ml-warning: #b45309;
-			--ml-error: #b91c1c;
-			--ml-bg: #f3f7fb;
-			--ml-panel: #ffffff;
-			--ml-panel-soft: #edf4ff;
-			--ml-text: #0f172a;
-			--ml-muted: #475569;
-			--ml-border: #dfe7f3;
+			--ml-primary-soft: #142d52;
+			--ml-accent: #9333ea;
+			--ml-navy: #07101c;
+			--ml-navy-soft: #0b1726;
+			--ml-success: #10b981;
+			--ml-warning: #f59e0b;
+			--ml-error: #ef4444;
+			--ml-bg: #081321;
+			--ml-panel: #0e1b2b;
+			--ml-panel-soft: #13243a;
+			--ml-text: #e7edf6;
+			--ml-muted: #9aa9bc;
+			--ml-border: #203750;
 		}
 		[data-testid="stApp"] {
-			--ml-primary: light-dark(#2563eb, #2563eb);
-			--ml-primary-strong: light-dark(#1d4ed8, #1d4ed8);
-			--ml-primary-soft: light-dark(#dbeafe, #172e50);
-			--ml-bg: light-dark(#edf3fb, #0b1220);
-			--ml-panel: light-dark(#ffffff, #111827);
-			--ml-panel-soft: light-dark(#edf4ff, #17263c);
-			--ml-text: light-dark(#0f172a, #f1f5f9);
-			--ml-muted: light-dark(#475569, #b6c2d1);
-			--ml-border: light-dark(#dfe7f3, #334155);
-			--ml-control: light-dark(#ffffff, #1f2937);
+			--ml-primary: #2563eb;
+			--ml-primary-strong: #1d4ed8;
+			--ml-primary-soft: #142d52;
+			--ml-bg: #081321;
+			--ml-panel: #0e1b2b;
+			--ml-panel-soft: #13243a;
+			--ml-text: #e7edf6;
+			--ml-muted: #9aa9bc;
+			--ml-border: #203750;
+			--ml-control: #0a1727;
 			background: var(--ml-bg);
 			color: var(--ml-text);
 		}
@@ -170,12 +172,14 @@ def inject_theme() -> None:
 			color: #ffffff !important;
 		}
 		.block-container {
-			padding-top: 1.5rem;
-			padding-bottom: 3rem;
-			max-width: 1400px;
+			padding-top: 2.75rem;
+			padding-bottom: 1.5rem;
+			max-width: none;
 		}
 		[data-testid="stSidebar"] {
-			background: linear-gradient(180deg, var(--ml-navy) 0%, var(--ml-navy-soft) 100%);
+			width: 14rem;
+			min-width: 14rem;
+			background: linear-gradient(180deg, #07111e 0%, #0a1725 100%);
 			border-right: 1px solid rgba(148, 163, 184, 0.15);
 		}
 		[data-testid="stSidebar"] * {
@@ -187,17 +191,18 @@ def inject_theme() -> None:
 			color: #e2e8f0;
 			text-align: left;
 			justify-content: flex-start;
-			border-radius: 12px;
-			min-height: 2.8rem;
-			padding: 0.72rem 0.9rem;
+			border-radius: 6px;
+			min-height: 1.85rem;
+			padding: 0.22rem 0.5rem;
+			font-size: 0.78rem;
 			font-weight: 600;
 		}
 		[data-testid="stSidebar"] .stButton > button:hover,
 		[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-			background: linear-gradient(135deg, var(--ml-primary) 0%, var(--ml-primary-strong) 100%);
+			background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
 			color: #ffffff;
-			border-color: rgba(96, 165, 250, 0.8);
-			box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2);
+			border-color: rgba(192, 132, 252, 0.65);
+			box-shadow: 0 5px 14px rgba(124, 58, 237, 0.22);
 		}
 		[data-testid="stSidebar"] .stButton > button:focus,
 		.stButton > button:focus-visible {
@@ -210,7 +215,6 @@ def inject_theme() -> None:
 		.ml-brand-title {
 			font-size: clamp(2rem, 2.5vw, 2.8rem);
 			font-weight: 800;
-			letter-spacing: -0.06em;
 			line-height: 1.05;
 			color: #f8fafc;
 		}
@@ -227,53 +231,56 @@ def inject_theme() -> None:
 			line-height: 1.45;
 		}
 		.ml-topbar {
-			margin: 0 0 1.25rem;
-			padding: 0.75rem 1.2rem 1rem 1.2rem;
-			border: 1px solid var(--ml-border);
-			border-radius: 14px;
-			background: var(--ml-panel);
-			box-shadow: 0 6px 18px rgba(15, 23, 42, 0.02);
+			margin: 0 0 .85rem;
+			padding: .15rem .2rem .25rem;
 		}
 		.ml-topbar-title {
 			color: var(--ml-text);
-			font-size: clamp(2rem, 2.6vw, 3rem);
+			font-size: clamp(1.5rem, 2vw, 2.05rem);
 			font-weight: 800;
 			line-height: 1.1;
 		}
 		.ml-topbar-subtitle {
 			margin-top: 0.2rem;
 			color: var(--ml-muted);
-			font-size: 0.95rem;
+			font-size: 0.78rem;
 		}
 		.ml-page-header {
-			margin: 0.35rem 0 1.4rem;
-			padding: 0.2rem 0;
+			margin: 0.2rem 0 0.65rem;
+			padding: 0.05rem 0;
 		}
 		.ml-page-header h1 {
 			margin: 0;
 			color: var(--ml-text);
-			font-size: clamp(1.9rem, 2.5vw, 2.6rem);
-			letter-spacing: -0.045em;
+			font-size: 1.55rem;
 			line-height: 1.1;
 		}
 		.ml-page-header p {
-			margin: 0.5rem 0 0;
+			margin: 0.25rem 0 0;
 			color: var(--ml-muted);
-			font-size: 1rem;
+			font-size: 0.82rem;
 		}
 		.ml-eyebrow {
-			color: var(--ml-primary);
+			color: #60a5fa;
 			font-size: 0.72rem;
 			font-weight: 800;
-			letter-spacing: 0.12em;
 			text-transform: uppercase;
 			margin-bottom: 0.5rem;
 		}
+		.ml-sidebar-brand { display: flex; align-items: center; gap: .65rem; margin: .1rem 0 .5rem; }
+		.ml-sidebar-mark { display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: .55rem; background: linear-gradient(135deg, #06b6d4, #2563eb); color: #fff; font-size: 1rem; }
+		.ml-sidebar-title { color: #f8fafc; font-size: 1.05rem; font-weight: 800; line-height: 1.05; }
+		.ml-sidebar-title span { display: block; color: #d946ef; }
+		.ml-sidebar-subtitle { margin-top: .35rem; color: #91a0b5; font-size: .66rem; line-height: 1.3; }
+		.ml-sidebar-section-label { margin: 0 0 .3rem; color: #71819a; font-size: .66rem; font-weight: 800; text-transform: uppercase; }
+		.ml-sidebar-note { display: flex; gap: .55rem; margin-top: .9rem; padding: .65rem; border: 1px solid rgba(71, 85, 105, .55); border-radius: .45rem; color: #cbd5e1; font-size: .7rem; line-height: 1.45; }
+		.ml-sidebar-note-icon { color: #10b981; font-size: .65rem; }
+		.ml-sidebar-note span { color: #8291a7; }
 		.ml-card {
 			background: var(--ml-panel);
 			border: 1px solid var(--ml-border);
-			border-radius: 14px;
-			padding: 1rem;
+			border-radius: 7px;
+			padding: 0.72rem;
 			box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
 		}
 		.ml-card h3 {
@@ -311,7 +318,7 @@ def inject_theme() -> None:
 			align-items: center;
 			gap: 0.9rem;
 			padding: 1.1rem 1.15rem;
-			border-radius: 14px;
+			border-radius: 7px;
 			background: var(--ml-panel-soft);
 			border: 1px solid rgba(37, 99, 235, 0.12);
 			color: var(--ml-text);
@@ -323,7 +330,7 @@ def inject_theme() -> None:
 			justify-content: center;
 			width: 2.5rem;
 			height: 2.5rem;
-			border-radius: 12px;
+			border-radius: 6px;
 			background: var(--ml-primary-soft);
 		}
 		.ml-empty-title {
@@ -338,18 +345,18 @@ def inject_theme() -> None:
 		div[data-testid="stMetric"] {
 			background: var(--ml-panel);
 			border: 1px solid var(--ml-border);
-			border-radius: 12px;
-			padding: 0.8rem 0.9rem;
+			border-radius: 6px;
+			padding: 0.55rem 0.65rem;
 			box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
 		}
 		div[data-testid="stExpander"] {
 			border: 1px solid var(--ml-border);
-			border-radius: 12px;
+			border-radius: 6px;
 			background: var(--ml-panel);
 			box-shadow: 0 6px 18px rgba(15, 23, 42, 0.02);
 		}
 		div[data-testid="stDataFrame"] {
-			border-radius: 12px;
+			border-radius: 6px;
 			overflow: hidden;
 		}
 		button[kind="primary"],
@@ -358,6 +365,7 @@ def inject_theme() -> None:
 			border: 1px solid rgba(96, 165, 250, 0.8) !important;
 			color: #ffffff !important;
 			box-shadow: 0 8px 16px rgba(37, 99, 235, 0.18);
+			border-radius: 6px !important;
 		}
 		button[kind="primary"]:hover,
 		[data-testid="stBaseButton-primary"]:hover {
@@ -369,6 +377,7 @@ def inject_theme() -> None:
 			background: var(--ml-control) !important;
 			border: 1px solid var(--ml-border) !important;
 			color: var(--ml-text) !important;
+			border-radius: 6px !important;
 		}
 		button[kind="secondary"]:hover,
 		[data-testid="stBaseButton-secondary"]:hover {
@@ -379,13 +388,13 @@ def inject_theme() -> None:
 		div[data-testid="stFileUploader"] {
 			background: rgba(15, 23, 42, 0.04);
 			border: 1px solid var(--ml-border);
-			border-radius: 14px;
+			border-radius: 7px;
 			padding: 0.2rem 0.15rem;
 		}
 		div[data-testid="stFileUploader"] section {
 			background: var(--ml-control);
 			border: 1px solid rgba(148, 163, 184, 0.25);
-			border-radius: 12px;
+			border-radius: 6px;
 			padding: 0.9rem 1rem;
 		}
 		div[data-testid="stFileUploader"] button,
@@ -421,7 +430,7 @@ def inject_theme() -> None:
 			background: var(--ml-control) !important;
 			color: var(--ml-text) !important;
 			border: 1px solid var(--ml-border) !important;
-			border-radius: 10px !important;
+			border-radius: 6px !important;
 		}
 		.stTextInput input::placeholder,
 		.stTextArea textarea::placeholder,
@@ -442,13 +451,11 @@ def inject_theme() -> None:
 				padding-left: 1rem;
 				padding-right: 1rem;
 			}
-			[data-testid="stSidebar"] {
-				width: min(300px, 100vw);
-			}
+			[data-testid="stSidebar"] { width: min(14rem, 100vw); }
 		}
 		@media (max-width: 768px) {
 			.block-container {
-				padding-top: 0.75rem;
+				padding-top: 2.5rem;
 				padding-left: 0.75rem;
 				padding-right: 0.75rem;
 			}

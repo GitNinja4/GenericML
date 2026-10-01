@@ -22,7 +22,11 @@ def clear_training_state() -> None:
         "evaluation_results": {},
         "best_pipeline": None,
         "prediction_schema": {},
+        "prediction_result": None,
         "mlflow_run_information": {},
+        "tuning_results": {},
+        "tuned_models": {},
+        "final_model_name": None,
     }.items():
         st.session_state[key] = default
 
@@ -111,6 +115,11 @@ def reset_dataset_dependent_state() -> None:
     }.items():
         st.session_state[key] = default
     st.session_state.pop("problem_type_selector", None)
+    for key in list(st.session_state):
+        if key.startswith(("model_param_", "model_toggle_")):
+            st.session_state.pop(key, None)
+    for key in ("model_search", "model_family_filter", "model_sort", "model_selection_widget", "model_selection_widget_type"):
+        st.session_state.pop(key, None)
     st.session_state["visited_pages"] = ["dataset"]
     clear_preprocessing_state(reset_controls=True)
 
@@ -179,7 +188,11 @@ def initialize_session_state() -> None:
         "evaluation_results": {},
         "best_pipeline": None,
         "prediction_schema": {},
+        "prediction_result": None,
         "mlflow_run_information": {},
+        "tuning_results": {},
+        "tuned_models": {},
+        "final_model_name": None,
     }
 
     for key, value in defaults.items():

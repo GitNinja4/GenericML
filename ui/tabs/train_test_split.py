@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from src.training.splitter import split_dataset
-from ui.components import navigate, render_empty_state, render_page_header, render_workflow_progress
+from ui.components import navigate, render_empty_state, render_page_header
 
 
 def _invalidate_split() -> None:
@@ -64,8 +64,11 @@ def _render_split_results(problem_type: str) -> None:
 	X_test = st.session_state["X_test"]
 	y_train = st.session_state["y_train"]
 	y_test = st.session_state["y_test"]
-	st.markdown("#### Split results")
-	st.success("Split completed. Preprocessing has not been fitted or applied.")
+	st.markdown("#### Split summary")
+	st.success(
+		"Train/test split completed successfully. The test set is now locked and will only be used during Evaluation.",
+		icon=":material/verified_user:",
+	)
 	train_column, test_column = st.columns(2)
 	with train_column:
 		with st.container(border=True):
@@ -74,9 +77,9 @@ def _render_split_results(problem_type: str) -> None:
 			st.caption(f"X_train: {X_train.shape[1]} raw features · y_train: 1 target")
 	with test_column:
 		with st.container(border=True):
-			st.markdown("**Testing set**")
+			st.markdown("**Test set · protected**")
 			st.metric("Rows", f"{len(X_test):,}", f"{len(X_test) / (len(X_train) + len(X_test)):.0%} of dataset")
-			st.caption(f"X_test: {X_test.shape[1]} raw features · y_test: 1 target")
+			st.caption("X_test and y_test remain untouched until Evaluation.")
 	if problem_type == "classification":
 		counts = pd.concat(
 			[
@@ -86,14 +89,14 @@ def _render_split_results(problem_type: str) -> None:
 			axis=1,
 		).fillna(0).astype(int)
 		with st.container(border=True):
-			st.markdown("#### Target distribution")
+			st.markdown("#### Class distribution")
+			st.caption("Compare the target proportions in the training and protected test partitions.")
 			st.bar_chart(counts)
 
 
 def render_train_test_split_tab() -> None:
 	"""Split untouched features and target before preprocessing configuration."""
 	dataset = st.session_state.get("dataset")
-	render_workflow_progress("train_test_split")
 	if dataset is None:
 		render_page_header("Train / Test Split", "Create a reproducible holdout before preprocessing.", "03 · Split")
 		render_empty_state("No dataset available", "Upload and validate a dataset before creating a split.", "database")
@@ -113,7 +116,7 @@ def render_train_test_split_tab() -> None:
 	with page_column:
 		render_page_header(
 			"Train / Test Split",
-			"Split raw features and target before configuring preprocessing.",
+			"Split the dataset into training and test sets.",
 			"03 · Train / Test Split",
 		)
 		st.info(

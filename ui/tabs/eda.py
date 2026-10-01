@@ -33,15 +33,15 @@ from src.visualization.eda_plots import (
 	create_scatter_plot,
 	create_target_distribution,
 )
-from ui.components import render_cta, render_empty_state, render_page_header, render_workflow_progress
+from ui.components import render_cta, render_empty_state, render_page_header
 
 
 def _render_eda_header(df: pd.DataFrame, target_column: str | None, problem_type: str | None) -> None:
 	heading_column, dataset_column = st.columns([2.7, 1], vertical_alignment="center")
 	with heading_column:
 		render_page_header(
-			"Exploratory data analysis",
-			"Explore and understand your dataset through visualizations and statistics.",
+			"Exploratory Data Analysis",
+			"Understand your data through visualizations and insights.",
 			"02 · Understand",
 		)
 	with dataset_column:
@@ -55,13 +55,12 @@ def _render_eda_header(df: pd.DataFrame, target_column: str | None, problem_type
 
 
 def _render_plot(figure: go.Figure, key: str, height: int = 250) -> None:
-	theme = getattr(st.context, "theme", None)
-	is_dark = getattr(theme, "type", "light") == "dark"
 	figure.update_layout(
-		template="plotly_dark" if is_dark else "plotly_white",
+		template="plotly_dark",
 		paper_bgcolor="rgba(0,0,0,0)",
 		plot_bgcolor="rgba(0,0,0,0)",
-		font={"color": "#f1f5f9" if is_dark else "#0f172a"},
+		font={"color": "#f1f5f9"},
+		coloraxis_colorbar={"outlinecolor": "#334155"},
 		margin={"l": 16, "r": 16, "t": 42, "b": 20},
 		height=height,
 	)
@@ -421,14 +420,32 @@ def _render_insights(df: pd.DataFrame, target_column: str | None, problem_type: 
 		st.markdown(f"- {insight}")
 
 
+def _render_automated_insights(df: pd.DataFrame, target_column: str | None, problem_type: str | None) -> None:
+	"""Show factual observations without changing the dataset or recommending actions automatically."""
+	with st.container(border=True):
+		st.subheader("Automated insights")
+		st.caption("These observations describe the current dataset. No preprocessing or modeling choice is applied automatically.")
+		_render_insights(df, target_column, problem_type)
+
+		missing = get_missing_value_summary(df)
+		missing = missing[missing["Missing Count"] > 0]
+		if not missing.empty:
+			st.warning(f"{len(missing)} column(s) contain missing values. Choose a handling method during preprocessing.")
+		else:
+			st.success("No missing values detected in the uploaded dataset.")
+
+		strong = detect_high_correlations(df)
+		if not strong.empty:
+			st.warning("Potential high correlation detected. Correlated features are not removed automatically.")
+
+
 def render_eda_tab() -> None:
 	"""Render observational EDA for the currently loaded dataset."""
-	render_workflow_progress("eda")
 	dataset = st.session_state.get("dataset")
 	if dataset is None:
 		render_page_header(
-			"Exploratory data analysis",
-			"Explore and understand your dataset through visualizations and statistics.",
+			"Exploratory Data Analysis",
+			"Understand your data through visualizations and insights.",
 			"02 · Understand",
 		)
 		render_empty_state("No dataset available", "Upload a CSV dataset from the Dataset tab to begin EDA.", "upload_file")
@@ -436,7 +453,15 @@ def render_eda_tab() -> None:
 	target_column = st.session_state.get("target_column")
 	problem_type = st.session_state.get("problem_type") or st.session_state.get("detected_problem_type")
 	_render_eda_header(dataset, target_column, problem_type)
-	tabs = st.tabs(["Overview", "Missing Values", "Distributions", "Correlations", "Outliers", "Target Analysis"])
+	tabs = st.tabs([
+		"Overview",
+		"Missing Values",
+		"Distributions",
+		"Correlation",
+		"Outliers",
+		"Target Analysis",
+		"Automated Insights",
+	])
 	with tabs[0]:
 		_render_overview(dataset, target_column, problem_type)
 	with tabs[1]:
@@ -453,4 +478,6 @@ def render_eda_tab() -> None:
 		_render_outliers(dataset)
 	with tabs[5]:
 		_render_target_analysis(dataset, target_column, problem_type)
+	with tabs[6]:
+		_render_automated_insights(dataset, target_column, problem_type)
 	render_cta("Continue to Train / Test Split →", "train_test_split", "eda_to_train_test_split")

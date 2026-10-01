@@ -30,15 +30,20 @@ def _reset_dataset_dependent_state() -> None:
 
 def render_dataset_tab() -> None:
     """Render the dataset upload, validation, and target configuration UI."""
-    render_page_header("Dataset workspace", "Upload a dataset, choose a target, and confirm the problem type.", "01 · Start here")
+    render_page_header("Dataset", "Upload your dataset and select the target column.", "01 · Start here")
 
+    upload_generation = st.session_state.get("dataset_upload_generation", 0)
     with st.container(border=True):
-        st.subheader("Upload a CSV file")
+        st.subheader("Upload CSV file")
+        st.caption("CSV files are supported for this workflow.")
         upload_column, file_column = st.columns([1.6, 1], vertical_alignment="center")
         with upload_column:
-            uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"], label_visibility="collapsed")
+            uploaded_file = st.file_uploader(
+                "Drag and drop a CSV file here, or click to browse",
+                type=["csv"],
+                key=f"dataset_uploader_{upload_generation}",
+            )
         with file_column:
-            st.markdown("#### Uploaded file")
             file_name = st.session_state.get("dataset_name")
             file_size = st.session_state.get("dataset_file_size")
             if uploaded_file is not None:
@@ -46,18 +51,20 @@ def render_dataset_tab() -> None:
                 file_size = uploaded_file.size
 
             if file_name:
-                st.markdown(f"**{file_name}**")
+                st.markdown("**File loaded successfully**")
+                st.caption(f"{file_name}")
                 if file_size is not None:
                     size_label = (
                         f"{file_size / (1024 * 1024):.1f} MB"
                         if file_size >= 1024 * 1024
                         else f"{file_size / 1024:.1f} KB"
                     )
-                    st.caption(f"CSV · {size_label} · Ready to analyze")
+                    dataset_shape = st.session_state.get("dataset_shape", (0, 0))
+                    st.caption(f"{size_label} · {dataset_shape[0]:,} rows × {dataset_shape[1]:,} columns")
                 else:
-                    st.caption("CSV · Ready to analyze")
+                    st.caption("Ready to analyze")
             else:
-                st.caption("Your selected CSV file will appear here.")
+                st.caption("No file selected")
 
     if uploaded_file is not None:
         file_fingerprint = hashlib.sha256(uploaded_file.getvalue()).hexdigest()
@@ -102,51 +109,63 @@ def render_dataset_tab() -> None:
 
     summary = summarize_dataset(dataset)
     with st.container(border=True):
-        st.subheader("Dataset overview")
+        st.subheader("Dataset information")
         render_stat_cards(
             [
                 ("Rows", f"{summary['rows']:,}"),
                 ("Columns", summary["columns"]),
-                ("Numerical", summary["numerical_columns"]),
-                ("Categorical", summary["categorical_columns"]),
+                ("Numerical features", summary["numerical_columns"]),
+                ("Categorical features", summary["categorical_columns"] + summary["boolean_columns"]),
             ]
         )
-        st.caption(f"Missing values: {summary['missing_values']:,}  ·  Duplicate rows: {summary['duplicate_rows']:,}")
+        st.caption(
+            f"Missing values: {summary['missing_values']:,}  ·  "
+            f"Duplicate rows: {summary['duplicate_rows']:,}"
+        )
 
     with st.container(border=True):
         preview_title, preview_control = st.columns([3, 1], vertical_alignment="center")
-        preview_title.subheader("Dataset Preview")
+        preview_title.subheader("Dataset preview")
         with preview_control:
             preview_rows = st.selectbox("Rows to preview", [10, 25, 50, 100], index=0)
         st.dataframe(dataset.head(preview_rows), width="stretch")
 
     with st.container(border=True):
-        st.subheader("Column Metadata")
-        metadata = get_column_metadata(dataset)
-        st.dataframe(metadata, width="stretch")
-
-    with st.container(border=True):
-        st.subheader("Target Selection")
+        st.subheader("Target column")
+        st.caption("Choose the column the model should learn to predict. The application will not assume a target for you.")
         target_column_col, problem_type_col = st.columns([1.15, 1.85], vertical_alignment="bottom")
         with target_column_col:
+            target_options = dataset.columns.tolist()
+            target_value = st.session_state.get("target_column")
+            target_index = target_options.index(target_value) if target_value in target_options else None
             target_column = st.selectbox(
-                "Select target column",
-                options=dataset.columns.tolist(),
-                index=(dataset.columns.tolist().index(st.session_state.get("target_column")) if st.session_state.get("target_column") in dataset.columns else 0),
+                "Target column",
+                options=target_options,
+                index=target_index,
+                placeholder="Select a target column",
             )
         with problem_type_col:
-            if "problem_type_selector" not in st.session_state:
-                st.session_state["problem_type_selector"] = st.session_state.get("problem_type_selection", "Automatic")
-            selected_problem_type = st.radio(
-                "Problem Type",
-                ["Automatic", "Classification", "Regression"],
-                key="problem_type_selector",
-                horizontal=True,
-            )
-            st.session_state["problem_type_selection"] = selected_problem_type
+            selected_problem_type = st.session_state.get("problem_type_selection", "Automatic")
+            if target_column is not None:
+                if "problem_type_selector" not in st.session_state:
+                    st.session_state["problem_type_selector"] = selected_problem_type
+                selected_problem_type = st.radio(
+                    "Problem type",
+                    ["Automatic", "Classification", "Regression"],
+                    key="problem_type_selector",
+                    horizontal=True,
+                )
+                st.session_state["problem_type_selection"] = selected_problem_type
 
     previous_target_column = st.session_state.get("target_column")
     previous_problem_type = st.session_state.get("problem_type")
+    if target_column is None:
+        st.session_state["target_column"] = None
+        st.session_state["problem_type"] = None
+        st.info("Select a target column to continue configuring the dataset.")
+        render_status_badge("Target selection required", "warning")
+        return
+
     target_changed = previous_target_column is not None and previous_target_column != target_column
     if target_changed:
         clear_preprocessing_state(reset_controls=True)
@@ -204,24 +223,26 @@ def render_dataset_tab() -> None:
             st.warning(warning)
 
     with st.container(border=True):
-        st.subheader("Target Summary")
+        st.subheader("Problem type")
         if effective_problem_type == "classification":
             class_counts = target_series.dropna().value_counts(sort=False).rename_axis("Class").reset_index(name="Count")
             if class_counts["Class"].map(type).nunique() > 1:
                 class_counts["Class"] = class_counts["Class"].map(repr)
-            class_labels = "Binary Classification" if st.session_state["target_n_classes"] == 2 else "Multiclass Classification"
+            class_labels = "Binary classification" if st.session_state["target_n_classes"] == 2 else "Multiclass classification"
             cols = st.columns(3)
-            cols[0].metric("Target Column", target_column)
-            cols[1].metric("Problem Type", class_labels)
-            cols[2].metric("Number of Classes", st.session_state["target_n_classes"])
+            cols[0].metric("Target", target_column)
+            cols[1].metric("Detected type", class_labels)
+            cols[2].metric("Target classes", st.session_state["target_n_classes"])
+            st.info(f"Target has {st.session_state['target_n_classes']} unique classes.")
             st.dataframe(class_counts, width="stretch", hide_index=True)
         else:
             target_summary = summarize_target(target_series, problem_type="regression")
             cols = st.columns(4)
-            cols[0].metric("Target Column", target_column)
-            cols[1].metric("Problem Type", "Regression")
-            cols[2].metric("Missing Values", target_summary["missing_count"])
-            cols[3].metric("Unique Values", target_summary["n_unique"])
+            cols[0].metric("Target", target_column)
+            cols[1].metric("Detected type", "Regression")
+            cols[2].metric("Missing values", target_summary["missing_count"])
+            cols[3].metric("Unique values", target_summary["n_unique"])
+            st.info("The selected target is numeric and will be treated as a regression problem.")
             st.dataframe(
                 pd.DataFrame(
                     {
@@ -237,5 +258,9 @@ def render_dataset_tab() -> None:
                 width="stretch",
             )
 
+    with st.expander("Column metadata", expanded=False):
+        metadata = get_column_metadata(dataset)
+        st.dataframe(metadata, width="stretch", hide_index=True)
+
     render_status_badge("Dataset configuration is ready", "success")
-    render_cta("Continue to EDA →", "eda", "dataset_to_eda")
+    render_cta("Proceed to EDA →", "eda", "dataset_to_eda")

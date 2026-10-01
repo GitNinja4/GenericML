@@ -55,9 +55,9 @@ def validate_preprocessing_config(
 	target_column: str | None,
 ) -> None:
 	"""Validate user choices before storing an active configuration."""
-	if config.numeric_missing_strategy not in {"None", "Mean", "Median", "Constant"}:
+	if config.numeric_missing_strategy not in {"None", "Mean", "Median", "Constant", "Drop"}:
 		raise ValueError(f"Unsupported numerical missing-value strategy: {config.numeric_missing_strategy}")
-	if config.categorical_missing_strategy not in {"None", "Most Frequent", "Constant"}:
+	if config.categorical_missing_strategy not in {"None", "Most Frequent", "Constant", "Drop"}:
 		raise ValueError(f"Unsupported categorical missing-value strategy: {config.categorical_missing_strategy}")
 	if config.encoding_strategy not in {"None", "One-Hot Encoding", "Ordinal Encoding"}:
 		raise ValueError(f"Unsupported categorical encoding strategy: {config.encoding_strategy}")

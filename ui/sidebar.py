@@ -5,16 +5,20 @@ from __future__ import annotations
 import streamlit as st
 
 from config.settings import APP_NAME, APP_SUBTITLE
+from src.utils.session_state import reset_dataset_dependent_state
 from ui.components import PAGE_ICONS, PAGE_LABELS, navigate
 
 
 def render_sidebar() -> None:
     """Render the application identity and current workflow progress."""
     with st.sidebar:
-        st.markdown(f"## {APP_NAME}")
-        st.caption(APP_SUBTITLE)
-        st.divider()
-        st.markdown('<div style="font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #94a3b8; margin-bottom: 0.8rem;">Workflow Progress</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="ml-sidebar-brand"><div class="ml-sidebar-mark">◆</div>'
+            f'<div><div class="ml-sidebar-title">{APP_NAME} <span>Studio</span></div>'
+            f'<div class="ml-sidebar-subtitle">{APP_SUBTITLE}</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown('<div class="ml-sidebar-section-label">Workflow</div>', unsafe_allow_html=True)
 
         dataset_ready = (
             bool(st.session_state.get("dataset_valid"))
@@ -32,16 +36,32 @@ def render_sidebar() -> None:
             "Preprocessing": preprocessing_ready,
             "Models": bool(st.session_state.get("selected_models")),
             "Training": models_trained,
-            "Tuning": False,
-            "Evaluation": False,
-            "MLflow": False,
+            "Tuning": bool(st.session_state.get("tuning_results")),
+            "Evaluation": bool(st.session_state.get("evaluation_results")),
+            "MLflow": bool(st.session_state.get("mlflow_run_information")),
             "Prediction": st.session_state.get("best_pipeline") is not None,
         }
 
-        for page, label in PAGE_LABELS.items():
-            marker = "●" if page == st.session_state.get("current_page") else ("✓" if completed_steps[label] else "○")
-            button_type = "primary" if page == st.session_state.get("current_page") else "secondary"
-            if st.button(f"{marker}  {label}", key=f"nav_{page}", type=button_type, width="stretch", icon=f":material/{PAGE_ICONS[page]}:"):
+        for index, (page, label) in enumerate(PAGE_LABELS.items(), start=1):
+            active = page == st.session_state.get("current_page")
+            marker = "▶" if active else ("✓" if completed_steps[label] else str(index))
+            button_type = "primary" if active else "secondary"
+            button_label = f"{marker}  {index}  {label}" if active or completed_steps[label] else f"{index}  {label}"
+            if st.button(button_label, key=f"nav_{page}", type=button_type, width="stretch", icon=f":material/{PAGE_ICONS[page]}:"):
                 navigate(page)
 
-        st.caption("Your work stays in this session. Change upstream settings to refresh downstream results.")
+        dataset = st.session_state.get("dataset")
+        dataset_name = st.session_state.get("dataset_name") or "No dataset loaded"
+        with st.container(border=True):
+            st.markdown("**Session info**")
+            st.caption(dataset_name)
+            if dataset is not None:
+                st.caption(f"Target: {st.session_state.get('target_column') or 'Not selected'}")
+                st.caption(f"Rows: {len(dataset):,} · Features: {max(0, dataset.shape[1] - 1):,}")
+            else:
+                st.caption("Upload a CSV to begin.")
+        if st.button("Reset workflow", key="reset_workflow", width="stretch", icon=":material/restart_alt:"):
+            reset_dataset_dependent_state()
+            st.session_state["dataset_upload_generation"] = st.session_state.get("dataset_upload_generation", 0) + 1
+            st.session_state["current_page"] = "dataset"
+            st.rerun()

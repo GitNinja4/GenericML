@@ -13,7 +13,7 @@ from src.preprocessing.pipeline_builder import (
 )
 from src.utils.logging import get_logger
 from src.utils.session_state import clear_preprocessing_state
-from ui.components import navigate, render_cta, render_empty_state, render_page_header, render_workflow_progress
+from ui.components import navigate, render_cta, render_empty_state, render_page_header
 
 logger = get_logger(__name__)
 
@@ -86,10 +86,10 @@ def _render_feature_selection(dataset: pd.DataFrame, target_column: str | None) 
 
 
 def _render_missing_controls(has_numeric: bool, has_categorical: bool) -> tuple[str, float, str, str]:
-	st.markdown("#### 2. Missing values")
+	st.markdown("#### 1. Missing value handling")
 	numeric_strategy = st.selectbox(
 		"Numerical strategy",
-		["None", "Mean", "Median", "Constant"],
+		["None", "Mean", "Median", "Constant", "Drop"],
 		key="prep_numeric_missing",
 		disabled=not has_numeric,
 	)
@@ -98,7 +98,7 @@ def _render_missing_controls(has_numeric: bool, has_categorical: bool) -> tuple[
 		numeric_constant = st.number_input("Numerical constant value", value=0.0, key="prep_numeric_constant")
 	categorical_strategy = st.selectbox(
 		"Categorical strategy",
-		["None", "Most Frequent", "Constant"],
+		["None", "Most Frequent", "Constant", "Drop"],
 		key="prep_categorical_missing",
 		disabled=not has_categorical,
 	)
@@ -114,7 +114,7 @@ def _render_missing_controls(has_numeric: bool, has_categorical: bool) -> tuple[
 
 
 def _render_outlier_controls(has_numeric: bool) -> tuple[bool, str, str, float, float]:
-	st.markdown("#### 3. Outlier handling")
+	st.markdown("#### 2. Outlier handling")
 	enabled = st.checkbox("Enable outlier handling", value=False, key="prep_outliers_enabled", disabled=not has_numeric)
 	if not has_numeric:
 		st.info("Select numerical features to configure outlier handling.")
@@ -132,7 +132,7 @@ def _render_outlier_controls(has_numeric: bool) -> tuple[bool, str, str, float, 
 
 
 def _render_encoding_controls(has_categorical: bool) -> str:
-	st.markdown("#### 4. Categorical encoding")
+	st.markdown("#### 3. Encoding")
 	if not has_categorical:
 		st.info("No categorical features are selected.")
 	strategy = st.selectbox(
@@ -151,7 +151,7 @@ def _render_encoding_controls(has_categorical: bool) -> str:
 
 
 def _render_scaling_controls(has_numeric: bool) -> str:
-	st.markdown("#### 5. Feature scaling")
+	st.markdown("#### 4. Feature scaling")
 	if not has_numeric:
 		st.info("No numerical features are selected.")
 	strategy = st.selectbox(
@@ -165,7 +165,7 @@ def _render_scaling_controls(has_numeric: bool) -> str:
 
 
 def _render_feature_selection_controls(feature_count: int) -> tuple[bool, str, int]:
-	st.markdown("#### 6. Optional feature selection")
+	st.markdown("#### 5. Optional feature selection")
 	enabled = st.checkbox("Enable feature selection", value=False, key="prep_feature_selection_enabled")
 	method = st.selectbox("Method", ["SelectKBest"], key="prep_feature_selection_method", disabled=not enabled)
 	max_features = max(1, feature_count)
@@ -177,17 +177,32 @@ def _render_feature_selection_controls(feature_count: int) -> tuple[bool, str, i
 
 
 def _render_configuration(config: PreprocessingConfig) -> None:
-	st.json(config.to_dict())
-	st.caption("This configuration is serializable and can be logged or reused by a later training phase.")
+	st.markdown(
+		f"**Missing values:** Numerical → {config.numeric_missing_strategy}; "
+		f"Categorical → {config.categorical_missing_strategy}"
+	)
+	st.markdown(
+		f"**Outliers:** "
+		f"{config.outlier_method} {config.outlier_action.lower()}ing"
+		if config.outlier_enabled
+		else "**Outliers:** Disabled"
+	)
+	st.markdown(f"**Encoding:** {config.encoding_strategy}")
+	st.markdown(f"**Scaling:** {config.scaling_strategy}")
+	feature_selection = (
+		f"{config.feature_selection_method} — K={config.feature_selection_k}"
+		if config.feature_selection_enabled
+		else "Disabled"
+	)
+	st.markdown(f"**Feature selection:** {feature_selection}")
+	st.caption("This configuration is serializable and will be fitted on training data only.")
 	if config.encoding_strategy == "One-Hot Encoding":
-		st.info("The exact output feature count is determined after fitting on training data; unseen categories are ignored safely.")
-	else:
-		st.write(f"Configured input features: {len(config.selected_features)}")
+		st.info("Unseen categories are ignored safely during transformation.")
 
 
 def _pipeline_steps_markup(config: PreprocessingConfig, applied: bool) -> str:
 	steps = [
-		("Feature selection", f"{len(config.selected_features)} input features", bool(config.selected_features)),
+		("Feature inclusion", f"{len(config.selected_features)} input features", bool(config.selected_features)),
 		(
 			"Missing values",
 			f"{config.numeric_missing_strategy} · {config.categorical_missing_strategy}",
@@ -290,22 +305,21 @@ def render_preprocessing_tab() -> None:
 		return
 	target_column = st.session_state.get("target_column")
 	problem_type = st.session_state.get("problem_type") or st.session_state.get("detected_problem_type")
-	render_workflow_progress("preprocessing")
 	heading_column, information_column = st.columns([2.4, 1], vertical_alignment="center")
 	with heading_column:
-		render_page_header("Data preprocessing", "Configure transformations to prepare your data for machine learning.", "04 · Prepare")
+		render_page_header("Preprocessing Configuration", "Configure preprocessing based on your EDA findings.", "04 · Prepare")
 	with information_column:
 		_render_dataset_information(dataset, target_column, problem_type)
 	_render_summary(dataset, target_column, problem_type)
 	numeric_columns, categorical_columns = _feature_types(dataset, target_column)
 	main_column, pipeline_column = st.columns([2.2, 1], vertical_alignment="top")
 	with main_column:
-		feature_column, missing_column = st.columns(2, vertical_alignment="top")
-		with feature_column:
-			with st.container(border=True):
-				selected_features = _render_feature_selection(dataset, target_column)
-				excluded_features = [column for column in dataset.columns if column not in selected_features and column != target_column]
-				st.caption(f"{len(selected_features)} included · {len(excluded_features)} excluded · Target is kept separate")
+		with st.container(border=True):
+			selected_features = _render_feature_selection(dataset, target_column)
+			excluded_features = [column for column in dataset.columns if column not in selected_features and column != target_column]
+			st.caption(f"{len(selected_features)} included · {len(excluded_features)} excluded · Target is kept separate")
+
+		missing_column, outlier_column = st.columns(2, vertical_alignment="top")
 		with missing_column:
 			with st.container(border=True):
 				selected_numeric = [column for column in selected_features if column in numeric_columns]
@@ -317,22 +331,20 @@ def render_preprocessing_tab() -> None:
 				numeric_missing = int(dataset[selected_numeric].isna().sum().sum()) if selected_numeric else 0
 				categorical_missing = int(dataset[selected_categorical].isna().sum().sum()) if selected_categorical else 0
 				st.caption(f"{numeric_missing:,} numerical · {categorical_missing:,} categorical missing values")
-
-		outlier_column, encoding_column = st.columns(2, vertical_alignment="top")
 		with outlier_column:
 			with st.container(border=True):
 				outlier_enabled, outlier_method, outlier_action, lower, upper = _render_outlier_controls(bool(selected_numeric))
+
+		encoding_column, scaling_column = st.columns(2, vertical_alignment="top")
 		with encoding_column:
 			with st.container(border=True):
 				encoding_strategy = _render_encoding_controls(bool(selected_categorical))
-
-		scaling_column, selection_column = st.columns(2, vertical_alignment="top")
 		with scaling_column:
 			with st.container(border=True):
 				scaling_strategy = _render_scaling_controls(bool(selected_numeric))
-		with selection_column:
-			with st.container(border=True):
-				selection_enabled, selection_method, selection_k = _render_feature_selection_controls(len(selected_features))
+
+		with st.container(border=True):
+			selection_enabled, selection_method, selection_k = _render_feature_selection_controls(len(selected_features))
 
 	config = PreprocessingConfig(
 		numeric_missing_strategy=numeric_strategy,
